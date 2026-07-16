@@ -1,0 +1,122 @@
+/* ─────────────────────────────────────────────────
+   Founder CRM Landing — Custom Overrides
+   These complement Tailwind. Only styles that can't
+   be expressed cleanly with utility classes live here.
+───────────────────────────────────────────────── */
+
+/* Hero background: deep radial gradient for "serious product" tone */
+.hero-gradient {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(59, 130, 246, 0.15) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(139, 92, 246, 0.08) 0%, transparent 60%),
+    #0d0f14;
+}
+
+/* Bottom CTA banner: subtle gradient distinct from hero */
+.cta-banner-gradient {
+  background:
+    radial-gradient(ellipse 70% 80% at 50% 120%, rgba(59, 130, 246, 0.12) 0%, transparent 70%),
+    #0d0f14;
+}
+
+/* Animated gradient text for headline highlights */
+.text-gradient {
+  background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #34d399 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  background-size: 200% 200%;
+  animation: gradient-shift 6s ease infinite;
+}
+
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* CTA button: lift on hover */
+.cta-button {
+  transform: translateY(0);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.cta-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(59, 130, 246, 0.35);
+}
+
+.cta-button:active {
+  transform: translateY(0);
+}
+
+/* Pillar cards: subtle glow on hover (border color handled by Tailwind) */
+.pillar-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.pillar-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Pain cards: same lift effect */
+.pain-card {
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.pain-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* How It Works step items */
+.step-item {
+  transition: border-color 0.2s ease;
+}
+
+.step-item:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* Bot mockup shell: subtle inner glow */
+.mockup-shell {
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04),
+    0 24px 64px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+/* ─────────────────────────────────────────────────
+   Scrollbar: minimal dark styling (Webkit only)
+───────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0f14;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2535;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2d3748;
+}
+
+/* ─────────────────────────────────────────────────
+   Focus ring: accessible, on-brand
+───────────────────────────────────────────────── */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ─────────────────────────────────────────────────
+   Smooth scroll
+───────────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}

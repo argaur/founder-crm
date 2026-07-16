@@ -1,0 +1,21 @@
+# Environment — NEVER commit these
+.env
+bot/.env
+landing/dashboard/config.js
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+New Text Document.txt
+
+# Editor
+.vscode/
+.idea/
