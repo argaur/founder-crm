@@ -18,7 +18,7 @@ import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import uvicorn
@@ -547,8 +547,10 @@ async def api_overview(user: Dict[str, Any] = Depends(require_user)):
     won_leads = [l for l in pipeline["Closed-Won"] if won_this_month(l)]
 
     def move_in_iso(lead: Dict[str, Any]) -> Optional[str]:
+        # move_in_date is a free-text TEXT column ("next month", "Q3 2026",
+        # a real ISO date, or None) — never a date object. Pass through as-is.
         mid = lead.get("move_in_date")
-        return mid.isoformat() if mid else None
+        return mid if mid else None
 
     def lead_card(lead: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -595,8 +597,16 @@ async def api_overview(user: Dict[str, Any] = Depends(require_user)):
     for lead in active_leads:
         label = (lead.get("heat_score") or {}).get("label")
         mid = lead.get("move_in_date")
-        if label == "Hot" and mid and 0 <= (mid - now.date()).days <= 14:
-            attention_leads[lead["id"]] = lead
+        if label == "Hot" and mid:
+            # move_in_date is free text ("next month", "Q3 2026", ...) as
+            # often as it's a real ISO date — only apply the within-14-days
+            # urgency flag when it actually parses; otherwise skip silently.
+            try:
+                move_in = date.fromisoformat(mid)
+            except (ValueError, TypeError):
+                move_in = None
+            if move_in and 0 <= (move_in - now.date()).days <= 14:
+                attention_leads[lead["id"]] = lead
     for lead in pipeline["Negotiation"]:
         if max(0, (now - lead["last_activity_at"]).days) >= NUDGE_STALE_DAYS:
             attention_leads[lead["id"]] = lead

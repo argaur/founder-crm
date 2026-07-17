@@ -2656,9 +2656,11 @@
         </div>`;
       }).join('');
     }
-    function renderAttention(o) {}
-    function renderActivity(o) {}
-    function renderCities(o) {}
+    // Task 8/9/10 render logic lands in a later session — until then, show an
+    // honest placeholder instead of a blank body under the panel titles.
+    function renderAttention(o) { document.getElementById('home-attention').innerHTML = '<div class="panel-empty">More insights coming soon.</div>'; }
+    function renderActivity(o) { document.getElementById('home-activity').innerHTML = '<div class="panel-empty">More insights coming soon.</div>'; }
+    function renderCities(o) { document.getElementById('home-cities').innerHTML = '<div class="panel-empty">More insights coming soon.</div>'; }
     function applyRepLayout(role) {}
 
     // ── Render Pipeline ───────────────────────────────────────────
