@@ -16,6 +16,8 @@ import ai
 
 logger = logging.getLogger(__name__)
 
+DASHBOARD_BASE_URL = "https://argaur.github.io/founder-crm/dashboard/"
+
 # ─── ConversationHandler states for /addcontact ───────────────
 ADD_NAME, ADD_COMPANY, ADD_STAGE, ADD_SOURCE = range(4)
 
@@ -137,6 +139,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ─── /dashboard ───────────────────────────────────────────────
+
+async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends a returning user a fresh dashboard sign-in link. This is the
+    bot-side half of the promise landing/dashboard/index.html's sign-in
+    fallback screen already makes ("open your dashboard from the Telegram
+    bot") — without this command that promise had no code behind it."""
+    telegram_id = update.effective_user.id
+    user = await _get_user(telegram_id)
+    if not user:
+        await _not_registered(update)
+        return
+
+    token = db.make_dashboard_token(user["id"], user["role"])
+    link = f"{DASHBOARD_BASE_URL}?token={token}"
+    await update.message.reply_text(
+        f"Here's your dashboard, *{md(user['first_name'])}*\\.\n\n"
+        f"[Open Dashboard]({md(link)})",
+        parse_mode="MarkdownV2",
+        disable_web_page_preview=True,
+    )
+
+
 # ─── /help ────────────────────────────────────────────────────
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,6 +176,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/won \\[name\\] — Mark a deal Closed\\-Won\n"
         "/lost \\[name\\] — Mark a deal Closed\\-Lost\n"
         "/addcontact — Add a lead manually \\(guided\\)\n"
+        "/dashboard — Get a fresh link to your dashboard\n"
         "/reassign \\[lead id\\] \\[rep name\\] — Reassign a lead \\(managers only\\)\n"
         "/cancel — Exit any active flow\n\n"
         "Or just *forward a WhatsApp chat* or send a *voice note* — AI captures the deal automatically\\."
@@ -736,6 +762,7 @@ def get_handlers() -> list:
         CommandHandler("lost", lost_handler),
         CommandHandler("ask", ask_pipeline),
         CommandHandler("reassign", reassign),
+        CommandHandler("dashboard", dashboard_command),
         CommandHandler("cancel", cancel),
         CallbackQueryHandler(context_callback, pattern="^ctx:"),
         CallbackQueryHandler(mark_callback, pattern="^mark_"),
