@@ -152,7 +152,11 @@ Nixpacks, deployed via `railway up` from `bot/`. Confirmed by Gaurav 2026-07-17.
 - **State:** Postgres/FastAPI migration complete, dashboard rework complete, all live-verified against
   real Neon data (round-trips for rep pipeline, notes, stage changes, and the manager funnel/leaderboard/
   stalled-leads views, including 403 enforcement for non-manager roles). AI provider consolidated from
-  Anthropic+OpenAI onto OpenAI alone (`gpt-4o-mini` + Whisper, one key).
+  Anthropic+OpenAI onto OpenAI alone (`gpt-4o-mini` + Whisper, one key). A follow-up plan added the
+  auto space-matching engine (`flows.py`'s post-capture follow-up message + `GET /api/leads/{id}/matches`,
+  scored in `db.py`'s `score_space_for_lead`), dashboard-only lead signal tags (e.g. "Stalled — no
+  contact in N days", driven by `db.STALE_TAG_DAYS`, which now reads the same `NUDGE_STALE_DAYS` env var
+  as `main.py`'s nudge job), and a `/dashboard` command for returning users to get a fresh sign-in link.
 - **Current task:** `eval/score_extraction.py` has been ported to the new coworking-domain dataset and
   the new OpenAI extraction call, but has not been run yet — blocked on `OPENAI_API_KEY` being filled
   into `.env` (deliberately deferred to the end of the build, alongside `TELEGRAM_BOT_TOKEN`, per

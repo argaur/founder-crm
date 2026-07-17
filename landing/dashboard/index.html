@@ -2771,9 +2771,18 @@
         return;
       }
       el.innerHTML = (data.matches || []).map(m => {
-        const priceBit = m.price_per_seat != null
-          ? `${formatINR(m.price_per_seat)}/seat${lead.budget_per_seat ? ' vs ' + formatINR(lead.budget_per_seat) + ' budget' : ''}`
-          : '';
+        let priceBit = '';
+        if (m.price_per_seat != null) {
+          priceBit = `${formatINR(m.price_per_seat)}/seat`;
+          if (lead.budget_per_seat) {
+            if (m.price_per_seat <= lead.budget_per_seat) {
+              priceBit += ` vs ${formatINR(lead.budget_per_seat)} budget`;
+            } else {
+              const pctOver = Math.round((m.price_per_seat / lead.budget_per_seat - 1) * 100);
+              priceBit += ` (${pctOver}% over budget)`;
+            }
+          }
+        }
         const meta = [`${m.available_seats} seats free`, priceBit].filter(Boolean).map(esc).join(' · ');
         const reason = (m.reasons && m.reasons[0])
           ? `<div class="signal-tag">${esc(m.reasons[0])}</div>` : '';

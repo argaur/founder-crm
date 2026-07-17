@@ -139,7 +139,7 @@ def calculate_heat_score(lead: Dict[str, Any]) -> Dict[str, Any]:
 
 # --- SIGNAL TAG (Feature C) ---
 
-STALE_TAG_DAYS = 3   # aligned with main.py's NUDGE_STALE_DAYS default
+STALE_TAG_DAYS = int(os.getenv("NUDGE_STALE_DAYS", "3"))   # same env var + default as main.py's NUDGE_STALE_DAYS
 
 
 def _fmt_inr(value) -> str:

@@ -175,7 +175,11 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
   (Phase 8). AI provider consolidated from Anthropic+OpenAI onto OpenAI alone
   (`gpt-4o-mini` for extraction/reasoning + Whisper for transcription, one API key,
   Gaurav's call on 2026-07-17 to reduce accounts to manage) — `anthropic` dropped from
-  `requirements.txt`, `ANTHROPIC_API_KEY` removed everywhere.
+  `requirements.txt`, `ANTHROPIC_API_KEY` removed everywhere. A follow-up plan then
+  shipped the auto space-matching engine (bot follow-up message after capture +
+  `GET /api/leads/{id}/matches` + a dashboard "Suggested Matches" card on contact
+  detail), dashboard-only lead signal tags across the pipeline/follow-ups/stalled views,
+  and a `/dashboard` bot command sending returning users a fresh sign-in link.
 - **Current task:** Phase 9 — a full end-to-end demo-spine walkthrough with the bot
   actually polling Telegram, plus running the eval, once the blocker below clears.
 - **Blocker:** `TELEGRAM_BOT_TOKEN` and `OPENAI_API_KEY` are still blank in `bot/.env`
