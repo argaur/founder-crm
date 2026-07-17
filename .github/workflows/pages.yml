@@ -25,6 +25,13 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Generate dashboard config.js (no secrets — public API URL + bot link only)
+        run: |
+          cat > landing/dashboard/config.js <<'EOF'
+          const API_BASE_URL = 'https://founder-crm-bot-production.up.railway.app';
+          const BOT_LINK     = 'https://t.me/RethinkCRMbot';
+          const REFRESH_MS   = 5 * 60 * 1000;
+          EOF
       - uses: actions/upload-pages-artifact@v3
         with:
           path: landing

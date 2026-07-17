@@ -143,6 +143,11 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
 - Railway (`Procfile`, `railway.json`), FastAPI served via `uvicorn main:app`
 - Landing + dashboard deploy separately to GitHub Pages — see `landing/CLAUDE.md`
 
+**Deploy target:** Railway project `founder-crm` (id `e244123a-3939-47be-a654-18c001ec949a`),
+service `founder-crm-bot` (id `a517b096-668c-4209-8ea6-a40d36d73ada`), workspace
+`Gaurav Gupta's Projects` (id `e7c14b80-ab32-4a76-9d10-b64df2d0c455`), Hobby plan, runtime Python via
+Nixpacks, deployed via `railway up` from `bot/`. Confirmed by Gaurav 2026-07-17.
+
 ## Status
 - **State:** Postgres/FastAPI migration complete, dashboard rework complete, all live-verified against
   real Neon data (round-trips for rep pipeline, notes, stage changes, and the manager funnel/leaderboard/
