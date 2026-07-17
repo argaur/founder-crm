@@ -386,3 +386,79 @@ async def get_all_spaces(city: Optional[str] = None) -> List[Dict[str, Any]]:
             "SELECT * FROM spaces WHERE lower(city) = lower($1) ORDER BY name", city
         )
     return [dict(r) for r in rows]
+
+
+# --- SPACE MATCHING (Feature A) ---
+# Pure functions + one async wrapper (Task 2). Same precedent as
+# calculate_heat_score: computed at read time, never stored. Matching is done
+# in Python after a single get_all_spaces(city) fetch — the spaces table has
+# ~10 rows; SQL ranking is deliberate non-scope (see design doc 2026-07-17).
+# available_seats is NEVER decremented here — read-only suggestion engine.
+
+MATCH_REQUIRED_FIELDS = ("city", "seat_count")  # budget/space_type optional
+
+
+def is_matchable(lead: Dict[str, Any]) -> bool:
+    """True if the lead has a city and a positive seat_count."""
+    if not lead.get("city"):
+        return False
+    try:
+        return int(lead.get("seat_count") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def score_space_for_lead(lead: Dict[str, Any], space: Dict[str, Any]) -> Dict[str, Any]:
+    """Pure 0-100 match score. Assumes hard filters already passed
+    (same city, available_seats >= seat_count).
+
+    Weights: budget fit 45, space type 30, capacity fit 25.
+    Returns {"score": int, "reasons": List[str]} — reasons are short human
+    strings, ordered [type?, budget?, capacity].
+    """
+    seat_count = int(lead["seat_count"])
+    available = int(space["available_seats"])
+    reasons: List[str] = []
+
+    # Budget fit (max 45). NUMERIC columns arrive as Decimal from asyncpg —
+    # float() at the boundary, same as calculate_heat_score does.
+    budget = float(lead["budget_per_seat"]) if lead.get("budget_per_seat") else None
+    price = float(space["price_per_seat"]) if space.get("price_per_seat") else None
+    if budget and price:
+        over = max(0.0, price / budget - 1)
+        budget_points = 45.0 * max(0.0, 1 - over / 0.3)
+        if price <= budget:
+            pct_under = round((1 - price / budget) * 100)
+            if pct_under > 0:
+                reasons.append(
+                    f"₹{price:,.0f}/seat vs ₹{budget:,.0f} budget ({pct_under}% under)"
+                )
+            else:
+                reasons.append(f"₹{price:,.0f}/seat at budget")
+        else:
+            reasons.append(f"₹{price:,.0f}/seat ({round(over * 100)}% over budget)")
+    else:
+        budget_points = 22.0  # either value missing/null → neutral
+        if price:
+            reasons.append(f"₹{price:,.0f}/seat")
+
+    # Space type (max 30) — preferred, never required. A Managed Office lead
+    # should still see a great Private Cabin deal, just ranked lower.
+    lead_type = lead.get("space_type")
+    if lead_type and space.get("space_type") == lead_type:
+        type_points = 30.0
+        reasons.insert(0, "Exact space type")
+    elif not lead_type:
+        type_points = 15.0  # lead has no preference → neutral
+    else:
+        type_points = 0.0
+
+    # Capacity fit (max 25) — right-sizing: 50 into 60 beats 50 into 500.
+    # Hard filter guarantees ratio <= 1, no clamp needed.
+    capacity_points = 25.0 * (seat_count / available) if available else 0.0
+    reasons.append(f"{available} seats free for {seat_count}")
+
+    return {
+        "score": int(round(budget_points + type_points + capacity_points)),
+        "reasons": reasons,
+    }
