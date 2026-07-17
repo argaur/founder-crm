@@ -642,6 +642,7 @@ async def api_team_funnel(user: Dict[str, Any] = Depends(require_manager)):
             "stage": lead["stage"],
             "est_deal_value": float(lead["est_deal_value"]) if lead.get("est_deal_value") else None,
             "days_stalled": max(0, (now - lead["last_activity_at"]).days),
+            "signal_tag": lead["signal_tag"],
             "assigned_to": {"user_id": rep["id"], "name": rep["first_name"]} if rep else None,
         })
     stalled.sort(key=lambda s: s["days_stalled"], reverse=True)
