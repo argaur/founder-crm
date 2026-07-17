@@ -507,6 +507,183 @@ async def api_lead_interactions(
     return await db.get_interactions(lead_id, limit=20)
 
 
+@app.get("/api/overview")
+async def api_overview(user: Dict[str, Any] = Depends(require_user)):
+    """Role-scoped home overview (vision §5). Manager → platform-wide; rep →
+    own leads for leads-derived sections. Inventory (org-level) and activity
+    (platform-wide read) stay unscoped so a new rep's home is never blank.
+    Aggregation mirrors /api/team/funnel exactly (value_of, month-start proxy,
+    ACTIVE_STAGES)."""
+    scope = None if user["role"] == "manager" else user["id"]
+
+    pipeline = await db.get_all_leads(assigned_to=scope)
+    stale = await db.get_stale_leads(days=NUDGE_STALE_DAYS, assigned_to=scope)
+    spaces = await db.get_all_spaces()
+    recent = await db.get_recent_interactions(limit=10)
+    users = await db.get_all_users()
+    users_by_id = {u["id"]: u for u in users}
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def value_of(lead: Dict[str, Any]) -> float:
+        return float(lead.get("est_deal_value") or 0)
+
+    def won_this_month(lead: Dict[str, Any]) -> bool:
+        return lead["last_activity_at"] >= month_start
+
+    def heat_score(lead: Dict[str, Any]) -> int:
+        return (lead.get("heat_score") or {}).get("score", 0)
+
+    all_leads = [l for leads in pipeline.values() for l in leads]
+    company_names = await _company_names(all_leads)
+    for lead in all_leads:
+        lead["company"] = company_names.get(lead.get("company_id"))
+    stale_names = await _company_names(stale)
+    for lead in stale:
+        lead["company"] = stale_names.get(lead.get("company_id"))
+
+    active_leads = [l for s in ACTIVE_STAGES for l in pipeline[s]]
+    won_leads = [l for l in pipeline["Closed-Won"] if won_this_month(l)]
+
+    def move_in_iso(lead: Dict[str, Any]) -> Optional[str]:
+        mid = lead.get("move_in_date")
+        return mid.isoformat() if mid else None
+
+    def lead_card(lead: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": lead["id"],
+            "company": lead.get("company"),
+            "contact_name": lead.get("contact_name"),
+            "city": lead.get("city"),
+            "seat_count": lead.get("seat_count"),
+            "space_type": lead.get("space_type"),
+            "stage": lead.get("stage"),
+            "est_deal_value": value_of(lead),
+            "heat_score": lead.get("heat_score"),
+            "move_in_date": move_in_iso(lead),
+            "signal_tag": lead.get("signal_tag"),
+        }
+
+    funnel = [
+        {"stage": s, "count": len(pipeline[s]),
+         "value": sum(value_of(l) for l in pipeline[s])}
+        for s in db.STAGES
+    ]
+
+    heat = {"hot": 0, "warm": 0, "cold": 0}
+    for lead in active_leads:
+        label = (lead.get("heat_score") or {}).get("label", "Cold").lower()
+        if label in heat:
+            heat[label] += 1
+
+    city_agg: Dict[str, Dict[str, Any]] = {}
+    for lead in active_leads:
+        city = lead.get("city")
+        if not city:
+            continue
+        row = city_agg.setdefault(city, {"city": city, "active_count": 0, "pipeline_value": 0.0})
+        row["active_count"] += 1
+        row["pipeline_value"] += value_of(lead)
+    by_city = sorted(city_agg.values(), key=lambda c: c["pipeline_value"], reverse=True)
+
+    hottest = [lead_card(l) for l in sorted(active_leads, key=heat_score, reverse=True)[:4]]
+    site_visits = [lead_card(l) for l in sorted(pipeline["Site Visit"], key=heat_score, reverse=True)]
+
+    # attention = stalled ∪ (Hot with move-in ≤14d) ∪ (Negotiation quiet ≥3d), ≤5
+    attention_leads: Dict[int, Dict[str, Any]] = {l["id"]: l for l in stale}
+    for lead in active_leads:
+        label = (lead.get("heat_score") or {}).get("label")
+        mid = lead.get("move_in_date")
+        if label == "Hot" and mid and 0 <= (mid - now.date()).days <= 14:
+            attention_leads[lead["id"]] = lead
+    for lead in pipeline["Negotiation"]:
+        if max(0, (now - lead["last_activity_at"]).days) >= NUDGE_STALE_DAYS:
+            attention_leads[lead["id"]] = lead
+
+    def attention_item(lead: Dict[str, Any]) -> Dict[str, Any]:
+        rep = users_by_id.get(lead.get("assigned_to"))
+        return {
+            "lead_id": lead["id"],
+            "company": lead.get("company"),
+            "contact_name": lead.get("contact_name"),
+            "stage": lead.get("stage"),
+            "est_deal_value": value_of(lead),
+            "days_stalled": max(0, (now - lead["last_activity_at"]).days),
+            "move_in_date": move_in_iso(lead),
+            "assigned_to": {"user_id": rep["id"], "name": rep["first_name"]} if rep else None,
+        }
+
+    attention = sorted(
+        (attention_item(l) for l in attention_leads.values()),
+        key=lambda a: a["days_stalled"], reverse=True,
+    )[:5]
+
+    demand_by_city: Dict[str, int] = {}
+    for lead in active_leads:
+        city = lead.get("city")
+        seats = lead.get("seat_count")
+        if city and seats:
+            demand_by_city[city] = demand_by_city.get(city, 0) + int(seats)
+
+    inv_agg: Dict[str, Dict[str, Any]] = {}
+    for space in spaces:
+        city = space["city"]
+        agg = inv_agg.setdefault(city, {
+            "city": city, "space_count": 0, "total_seats": 0,
+            "available_seats": 0, "min_price_per_seat": None, "demand_seats": 0,
+        })
+        agg["space_count"] += 1
+        agg["total_seats"] += int(space.get("total_seats") or 0)
+        agg["available_seats"] += int(space.get("available_seats") or 0)
+        price = float(space["price_per_seat"]) if space.get("price_per_seat") is not None else None
+        if price is not None:
+            agg["min_price_per_seat"] = (
+                price if agg["min_price_per_seat"] is None
+                else min(agg["min_price_per_seat"], price)
+            )
+    for city, agg in inv_agg.items():
+        agg["demand_seats"] = demand_by_city.get(city, 0)
+    inventory = sorted(inv_agg.values(), key=lambda c: c["city"])
+
+    # companies/contacts computed from the already-fetched (scope-respecting)
+    # leads — avoids two unscoped COUNT(*) queries that would leak platform
+    # totals to a rep. Not shown in the 5-stat band; carried for completeness.
+    totals = {
+        "pipeline_value": sum(value_of(l) for l in active_leads),
+        "active_leads": len(active_leads),
+        "closed_won_count": len(won_leads),
+        "closed_won_value": sum(value_of(l) for l in won_leads),
+        "stalled_count": len(stale),
+        "companies": len({l["company_id"] for l in all_leads if l.get("company_id")}),
+        "contacts": len(all_leads),
+        "seats_demanded": sum(int(l["seat_count"]) for l in active_leads if l.get("seat_count")),
+        "seats_available": sum(int(s.get("available_seats") or 0) for s in spaces),
+    }
+
+    activity = [
+        {
+            "id": r["id"], "lead_id": r["lead_id"], "company": r["company"],
+            "type": r["type"], "ai_summary": r["ai_summary"], "user_name": r["user_name"],
+            "logged_at": r["logged_at"].isoformat() if r["logged_at"] else None,
+        }
+        for r in recent
+    ]
+
+    return {
+        "user": _public_user(user),
+        "totals": totals,
+        "funnel": funnel,
+        "heat": heat,
+        "by_city": by_city,
+        "hottest": hottest,
+        "site_visits": site_visits,
+        "attention": attention,
+        "inventory": inventory,
+        "activity": activity,
+    }
+
+
 @app.get("/api/leads/{lead_id}/matches")
 async def api_lead_matches(
     lead_id: int,

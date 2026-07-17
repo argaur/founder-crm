@@ -466,6 +466,28 @@ async def get_interactions(lead_id: int, limit: int = 5) -> List[Dict[str, Any]]
     return [dict(r) for r in rows]
 
 
+async def get_recent_interactions(limit: int = 10) -> List[Dict[str, Any]]:
+    """Most-recent interactions platform-wide, joined lead → company → user,
+    for the home activity feed. Mirrors get_interactions' style but cross-lead.
+    Always platform-wide (activity summaries aren't sensitive between reps and
+    a scoped read would blank a new rep's home)."""
+    rows = await _get_pool().fetch(
+        """
+        SELECT i.id, i.lead_id, i.type, i.ai_summary, i.logged_at,
+               c.name        AS company,
+               u.first_name  AS user_name
+        FROM interactions i
+        JOIN leads l      ON l.id = i.lead_id
+        LEFT JOIN companies c ON c.id = l.company_id
+        LEFT JOIN users u     ON u.id = i.user_id
+        ORDER BY i.logged_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
 # --- SPACE FUNCTIONS ---
 
 async def get_all_spaces(city: Optional[str] = None) -> List[Dict[str, Any]]:
