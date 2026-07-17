@@ -100,9 +100,65 @@ def calculate_heat_score(lead: Dict[str, Any]) -> Dict[str, Any]:
     return {"score": score, "label": label}
 
 
+# --- SIGNAL TAG (Feature C) ---
+
+STALE_TAG_DAYS = 3   # aligned with main.py's NUDGE_STALE_DAYS default
+
+
+def _fmt_inr(value) -> str:
+    """Compact INR (mirrors flows.fmt_inr — accepted micro-duplication:
+    importing flows from db would invert the dependency direction)."""
+    v = float(value)
+    if v >= 1e7:
+        return f"₹{v / 1e7:.1f}Cr"
+    if v >= 1e5:
+        return f"₹{v / 1e5:.1f}L"
+    return f"₹{v:,.0f}"
+
+
+def lead_signal_tag(lead: Dict[str, Any]) -> str:
+    """Pure. One-line 'why this lead, why now' synthesis. Never raises —
+    None/missing fields coerce like calculate_heat_score does.
+
+    Deliberate phrasing: "N touches, last Dd ago" (not "N in D days") — a
+    first-interaction timestamp would cost a per-lead query; not worth it.
+    """
+    interaction_count = lead.get("interaction_count") or 0
+    if interaction_count == 0:
+        return "New — no touches logged yet"
+
+    last_activity = lead.get("last_activity_at")
+    days = (datetime.now(timezone.utc) - last_activity).days if last_activity else 0
+    heat = lead.get("heat_score") or calculate_heat_score(lead)
+
+    if days >= STALE_TAG_DAYS:
+        tag = f"Stalled — no contact in {days} days"
+        # What the lead read as when last touched: recency forced to its
+        # 60-point max, engagement + deal size unchanged (same formulas as
+        # calculate_heat_score). Suffix only when the label actually differs
+        # — "Stalled — ..., was Cold" would add nothing.
+        engagement = min(15, interaction_count * 3)
+        value = float(lead.get("est_deal_value") or 0)
+        value_points = (
+            min(25.0, max(0.0, (math.log10(value) - 3) * 5)) if value > 0 else 0.0
+        )
+        potential = int(round(min(100, 60 + engagement + value_points)))
+        potential_label = "Hot" if potential >= 70 else "Warm" if potential >= 40 else "Cold"
+        if potential_label != heat["label"]:
+            tag += f", was {potential_label}"
+        return tag
+
+    touches = f"{interaction_count} touch" + ("" if interaction_count == 1 else "es")
+    tag = f"{heat['label']} — {touches}, last {days}d ago"
+    if lead.get("est_deal_value"):
+        tag += f", {_fmt_inr(lead['est_deal_value'])} deal"
+    return tag
+
+
 def _lead_with_heat(row: asyncpg.Record) -> Dict[str, Any]:
     lead = dict(row)
     lead["heat_score"] = calculate_heat_score(lead)
+    lead["signal_tag"] = lead_signal_tag(lead)
     return lead
 
 
