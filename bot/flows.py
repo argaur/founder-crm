@@ -1,6 +1,7 @@
 import os
 import logging
 import tempfile
+from datetime import datetime, timezone
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -21,6 +22,8 @@ logger = logging.getLogger(__name__)
 # ConversationHandler states for /addnote
 SELECTING_CONTACT, ADDING_NOTE, AWAITING_FOLLOWUP = range(3)
 
+SPACE_TYPES = {"Dedicated Desk", "Private Cabin", "Managed Office", "Day Pass"}
+
 
 # ─── Helpers ──────────────────────────────────────────────────
 
@@ -28,41 +31,63 @@ def md(text) -> str:
     return escape_markdown(str(text) if text is not None else "", version=2)
 
 
-def _get_user(telegram_id: int):
+def fmt_inr(value) -> str:
+    v = float(value)
+    if v >= 1e7:
+        return f"₹{v / 1e7:.1f}Cr"
+    if v >= 1e5:
+        return f"₹{v / 1e5:.1f}L"
+    return f"₹{v:,.0f}"
+
+
+def _as_int(value):
     try:
-        return db.get_user_by_telegram_id(telegram_id)
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value):
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _get_user(telegram_id: int):
+    try:
+        return await db.get_user_by_telegram_id(telegram_id)
     except Exception as e:
         logger.error(f"Error fetching user {telegram_id}: {e}")
         return None
 
 
-def _flatten_contact(rec: dict) -> dict:
-    """
-    Adapter: Airtable record → flat dict expected by ai.py functions.
-    Duplicated from commands.py to avoid circular imports.
-    """
-    fields = rec.get("fields", {})
-    heat = rec.get("heat_score", {})
-    score = heat.get("score", 0) if isinstance(heat, dict) else 0
-    label = heat.get("label", "Cold") if isinstance(heat, dict) else "Cold"
-    return {
-        "contact_name": fields.get("name", "Unknown"),
-        "company": fields.get("company", ""),
-        "role": fields.get("role", ""),
-        "stage": fields.get("stage", "Lead"),
-        "budget_signal": fields.get("budget_signal"),
-        "next_action": fields.get("next_action"),
-        "heat_score": score,
-        "heat_label": label,
-        "interaction_count": fields.get("interaction_count", 0),
-        "_record_id": rec.get("id"),
-    }
+def _pipeline_scope(user: dict):
+    """Managers see the team-wide pipeline; reps see only their own leads."""
+    return None if user.get("role") == "manager" else user["id"]
+
+
+async def _company_name(lead: dict) -> str:
+    if not lead.get("company_id"):
+        return ""
+    company = await db.get_company_by_id(lead["company_id"])
+    return company["name"] if company else ""
+
+
+def _lead_details(lead: dict) -> str:
+    parts = []
+    if lead.get("seat_count"):
+        parts.append(f"{lead['seat_count']} seats")
+    if lead.get("city"):
+        parts.append(lead["city"])
+    if lead.get("est_deal_value"):
+        parts.append(fmt_inr(lead["est_deal_value"]))
+    return " · ".join(parts)
 
 
 async def _not_registered(update: Update):
-    base = md(os.getenv("APP_BASE_URL", ""))
     await update.message.reply_text(
-        f"You're not registered yet\\. Visit {base} to create your account\\.",
+        "You're not registered yet\\. Send /start to set up your account\\.",
         parse_mode="MarkdownV2",
     )
 
@@ -70,69 +95,127 @@ async def _not_registered(update: Update):
 # ─── Core save logic (shared by all capture flows) ───────────
 
 async def _save_capture(
-    update: Update, user_id: str, extracted: dict, raw_text: str, source: str = "whatsapp_forward"
+    update: Update, user: dict, extracted: dict, raw_text: str, source: str = "whatsapp_forward"
 ):
     """
-    Finds or creates the contact, logs the interaction, and sends
-    the confirmation card with Looks good / Edit stage buttons.
-    Called after quality check passes.
+    Finds or creates the lead, logs the interaction, and sends the
+    confirmation card with Looks good / Edit stage buttons.
+
+    Stage rule: an extraction can move a lead FORWARD in the pipeline but never
+    backwards — a vague forwarded message must not knock a Negotiation-stage
+    deal back to Inquiry. Backwards extractions keep the current stage and get
+    flagged on the card for manual override. "unknown" never touches the stage.
     """
-    contact_name = extracted.get("contact_name", "Unknown")
-    company = extracted.get("company", "Unknown")
-    stage = extracted.get("stage", "Lead")
-    summary = extracted.get("summary", "")
-    next_action = extracted.get("next_action", "Follow up soon.")
-    role = extracted.get("role", "")
+    contact_name = extracted.get("contact_name") or "Unknown"
+    company = extracted.get("company")
+    role = extracted.get("role")
+    summary = extracted.get("summary") or ""
+    next_action = extracted.get("next_action")
+    extracted_stage = extracted.get("stage")
 
-    valid_stages = ["Lead", "Evaluating", "Proposal Sent", "Negotiating", "Won", "Lost"]
-    if stage not in valid_stages:
-        stage = "Lead"
-
-    # Find or create contact
-    existing = db.find_contact(contact_name, user_id)
-
-    if not existing:
-        # create_contact returns the Airtable record directly
-        new_rec = db.create_contact(
-            name=contact_name,
-            company=company,
-            role=role,
-            source=source,
-            user_id=user_id,
-        )
-        record_id = new_rec["id"]
-        if stage != "Lead":
-            db.update_contact_stage(record_id, stage)
-    else:
-        record_id = existing[0]["id"]
-        db.update_contact_stage(record_id, stage)
-
-    # Log the interaction (also increments interaction_count via db.log_interaction)
-    db.log_interaction(
-        contact_id=record_id,
-        type=source,
-        raw_content=raw_text[:5000],
-        ai_summary=summary,
-        telegram_message_id=update.message.message_id,
+    seat_count = _as_int(extracted.get("seat_count"))
+    city = extracted.get("city")
+    raw_space_type = extracted.get("space_type")
+    space_type = raw_space_type if raw_space_type in SPACE_TYPES else None
+    budget_per_seat = _as_float(extracted.get("budget_per_seat"))
+    move_in_date = extracted.get("move_in_date")
+    # Monthly contract value — the number the pipeline view aggregates.
+    est_deal_value = (
+        seat_count * budget_per_seat if seat_count and budget_per_seat else None
     )
 
-    # Re-fetch to get updated interaction_count for heat score calculation
-    updated_rec = db.get_contact_by_id(record_id)
-    heat = db.calculate_heat_score(updated_rec)
-    score = heat["score"]
-    label = heat["label"]
+    stage_note = None
+    matches = await db.find_leads(contact_name)
+
+    if not matches:
+        stage = extracted_stage if extracted_stage in db.STAGES else "Inquiry"
+        company_id = None
+        if company:
+            company_rec = await db.find_or_create_company(company, city=city)
+            company_id = company_rec["id"]
+
+        lead = await db.create_lead(
+            contact_name=contact_name,
+            company_id=company_id,
+            contact_role=role,
+            stage=stage,
+            seat_count=seat_count,
+            city=city,
+            space_type=space_type,
+            budget_per_seat=budget_per_seat,
+            est_deal_value=est_deal_value,
+            move_in_date=str(move_in_date) if move_in_date is not None else None,
+            assigned_to=user["id"],
+            source=source,
+        )
+        lead_id = lead["id"]
+    else:
+        lead = matches[0]
+        lead_id = lead["id"]
+        current_stage = lead["stage"]
+
+        if extracted_stage in db.STAGES:
+            if db.STAGES.index(extracted_stage) >= db.STAGES.index(current_stage):
+                if extracted_stage != current_stage:
+                    await db.update_lead_stage(lead_id, extracted_stage)
+            else:
+                stage_note = (
+                    f"Extracted stage ({extracted_stage}) is earlier than current "
+                    f"({current_stage}) — kept current stage, tap Edit stage to override."
+                )
+
+        # Fill in B2B fields the lead is still missing — never overwrite.
+        updates = {}
+        if company and not lead.get("company_id"):
+            company_rec = await db.find_or_create_company(company, city=city)
+            updates["company_id"] = company_rec["id"]
+        if seat_count and not lead.get("seat_count"):
+            updates["seat_count"] = seat_count
+        if city and not lead.get("city"):
+            updates["city"] = city
+        if space_type and not lead.get("space_type"):
+            updates["space_type"] = space_type
+        if budget_per_seat and not lead.get("budget_per_seat"):
+            updates["budget_per_seat"] = budget_per_seat
+        if est_deal_value and not lead.get("est_deal_value"):
+            updates["est_deal_value"] = est_deal_value
+        if move_in_date and not lead.get("move_in_date"):
+            updates["move_in_date"] = str(move_in_date)
+        if updates:
+            await db.update_lead(lead_id, **updates)
+
+    # No next_action column in the new schema — carried in the interaction summary.
+    ai_summary = f"{summary} Next action: {next_action}".strip() if next_action else summary
+
+    await db.log_interaction(
+        lead_id=lead_id,
+        type=source,
+        raw_content=raw_text[:5000],
+        ai_summary=ai_summary,
+        user_id=user["id"],
+    )
+
+    updated = await db.get_lead_by_id(lead_id)
+    heat = updated["heat_score"]
+    company_name = await _company_name(updated)
 
     card = (
         f"*Got it\\.*\n\n"
-        f"*{md(contact_name)}* @ {md(company)}\n"
-        f"Stage: {md(stage)} \\| Heat: {score} \\({md(label)}\\)\n\n"
-        f"*Summary:* {md(summary)}\n"
-        f"*Next:* {md(next_action)}"
+        f"*{md(updated['contact_name'])}* @ {md(company_name or 'Unknown')}\n"
+        f"Stage: {md(updated['stage'])} \\| Heat: {heat['score']} \\({md(heat['label'])}\\)\n"
     )
+    details = _lead_details(updated)
+    if details:
+        card += f"{md(details)}\n"
+    card += f"\n*Summary:* {md(summary)}"
+    if next_action:
+        card += f"\n*Next:* {md(next_action)}"
+    if stage_note:
+        card += f"\n\n_{md(stage_note)}_"
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("Looks good ✓", callback_data="capture_ok"),
-        InlineKeyboardButton("Edit stage", callback_data=f"edit_stage:{record_id}"),
+        InlineKeyboardButton("Edit stage", callback_data=f"edit_stage:{lead_id}"),
     ]])
 
     await update.message.reply_text(card, reply_markup=keyboard, parse_mode="MarkdownV2")
@@ -154,19 +237,16 @@ async def forward_or_text_handler(update: Update, context: ContextTypes.DEFAULT_
         telegram_id = update.effective_user.id
         logger.info(f"[capture] text received from {telegram_id}, len={len(update.message.text or '')}")
 
-        user = _get_user(telegram_id)
+        user = await _get_user(telegram_id)
         if not user:
             await _not_registered(update)
             return
-
-        user_id = user["fields"]["user_id"]
-        logger.info(f"[capture] user_id={user_id}")
 
         # Case 2: pending follow-up from a previous incomplete capture
         if context.user_data.get("pending_capture"):
             pending = context.user_data.pop("pending_capture")
             combined = pending["raw_text"] + "\n" + update.message.text
-            await _save_capture(update, user_id, pending["extracted"], combined)
+            await _save_capture(update, user, pending["extracted"], combined)
             return
 
         # Case 1: new capture
@@ -177,7 +257,7 @@ async def forward_or_text_handler(update: Update, context: ContextTypes.DEFAULT_
             return
 
         logger.info("[capture] calling ai.extract_from_text...")
-        extracted = ai.extract_from_text(content)
+        extracted = await ai.extract_from_text(content)
         logger.info(f"[capture] extracted={extracted}")
 
         if not extracted.get("contact_name"):
@@ -187,7 +267,7 @@ async def forward_or_text_handler(update: Update, context: ContextTypes.DEFAULT_
             )
             return
 
-        quality = ai.evaluate_note_quality(content)
+        quality = await ai.evaluate_note_quality(content)
         logger.info(f"[capture] quality={quality}")
 
         if not quality.get("is_complete"):
@@ -199,7 +279,7 @@ async def forward_or_text_handler(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text(md(followup_q), parse_mode="MarkdownV2")
             return
 
-        await _save_capture(update, user_id, extracted, content)
+        await _save_capture(update, user, extracted, content)
 
     except Exception as e:
         logger.exception(f"[capture] unhandled error: {e}")
@@ -216,12 +296,11 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Temp file is always deleted via try/finally.
     """
     telegram_id = update.effective_user.id
-    user = _get_user(telegram_id)
+    user = await _get_user(telegram_id)
     if not user:
         await _not_registered(update)
         return
 
-    user_id = user["fields"]["user_id"]
     status_msg = await update.message.reply_text("Transcribing\\.\\.\\.", parse_mode="MarkdownV2")
 
     # Use tempfile so this works on both Windows and Linux
@@ -233,42 +312,54 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         voice_file = await update.message.voice.get_file()
         await voice_file.download_to_drive(tmp_path)
 
-        transcript = ai.transcribe_voice(tmp_path)
+        transcript = await ai.transcribe_voice(tmp_path)
         logger.info(f"[voice] transcript={transcript[:120]}")
 
         # classify_intent returns the string "capture" or "recall" — not a dict
-        intent = ai.classify_intent(transcript)
+        intent = await ai.classify_intent(transcript)
         logger.info(f"[voice] intent={intent}")
 
         if intent == "recall":
             # Extract contact name from transcript to know who they're asking about
-            extracted = ai.extract_from_voice(transcript)
+            extracted = await ai.extract_from_voice(transcript)
             contact_name = extracted.get("contact_name")
 
             if contact_name:
-                matches = db.find_contact(contact_name, user_id)
+                matches = await db.find_leads(contact_name)
                 if matches:
-                    rec = matches[0]
-                    rec["heat_score"] = db.calculate_heat_score(rec)
-                    flat = _flatten_contact(rec)
-                    interactions_raw = db.get_interactions(rec["id"])
+                    lead = matches[0]
+                    heat = lead["heat_score"]
+                    company_name = await _company_name(lead)
+                    interactions = await db.get_interactions(lead["id"])
                     summaries = [
-                        r["fields"].get("ai_summary", "")
-                        for r in interactions_raw
-                        if r["fields"].get("ai_summary")
+                        r["ai_summary"] for r in interactions if r.get("ai_summary")
                     ]
-                    brief = ai.generate_context_brief(flat, summaries)
+
+                    budget_signal = None
+                    if lead.get("budget_per_seat"):
+                        budget_signal = f"₹{float(lead['budget_per_seat']):,.0f}/seat/month"
+
+                    brief = await ai.generate_context_brief(
+                        {
+                            "contact_name": lead["contact_name"],
+                            "company": company_name,
+                            "stage": lead["stage"],
+                            "heat_score": f"{heat['score']} ({heat['label']})",
+                            "budget_signal": budget_signal,
+                        },
+                        summaries,
+                    )
                     await status_msg.edit_text(md(brief), parse_mode="MarkdownV2")
                     return
 
             await status_msg.edit_text(
-                "Couldn't identify the contact\\. Try /context \\[name\\]\\.",
+                "Couldn't identify the lead\\. Try /context \\[name\\]\\.",
                 parse_mode="MarkdownV2",
             )
 
         else:
             # Capture intent — extract and save immediately, no quality gate for voice
-            extracted = ai.extract_from_voice(transcript)
+            extracted = await ai.extract_from_voice(transcript)
             logger.info(f"[voice] extracted={extracted}")
             await status_msg.delete()
 
@@ -279,7 +370,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-            await _save_capture(update, user_id, extracted, transcript, source="voice_note")
+            await _save_capture(update, user, extracted, transcript, source="voice_note")
 
     except Exception as e:
         logger.exception(f"[voice] unhandled error: {e}")
@@ -295,14 +386,13 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── Image / screenshot capture ───────────────────────────────
 
 async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Downloads the highest-resolution photo and extracts contact info via Claude Vision."""
+    """Downloads the highest-resolution photo and extracts lead info via Claude Vision."""
     telegram_id = update.effective_user.id
-    user = _get_user(telegram_id)
+    user = await _get_user(telegram_id)
     if not user:
         await _not_registered(update)
         return
 
-    user_id = user["fields"]["user_id"]
     status_msg = await update.message.reply_text("Reading image\\.\\.\\.", parse_mode="MarkdownV2")
 
     try:
@@ -311,7 +401,7 @@ async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_bytes = await photo_file.download_as_bytearray()
         logger.info(f"[image] downloaded {len(image_bytes)} bytes")
 
-        extracted = ai.extract_from_image(bytes(image_bytes), "image/jpeg")
+        extracted = await ai.extract_from_image(bytes(image_bytes), "image/jpeg")
         logger.info(f"[image] extracted={extracted}")
         await status_msg.delete()
 
@@ -325,7 +415,7 @@ async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        await _save_capture(update, user_id, extracted, "Contact info from screenshot", source="screenshot")
+        await _save_capture(update, user, extracted, "Contact info from screenshot", source="screenshot")
 
     except Exception as e:
         logger.exception(f"[image] unhandled error: {e}")
@@ -338,49 +428,51 @@ async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── /addnote ConversationHandler ────────────────────────────
 
 async def addnote_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = _get_user(update.effective_user.id)
+    user = await _get_user(update.effective_user.id)
     if not user:
         await _not_registered(update)
         return ConversationHandler.END
 
-    context.user_data["addnote"] = {}
-    await update.message.reply_text("Which contact is this note for?")
+    context.user_data["addnote"] = {"user_id": user["id"]}
+    await update.message.reply_text("Which lead is this note for?")
     return SELECTING_CONTACT
 
 
 async def addnote_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    SELECTING_CONTACT state. Searches for the contact.
-    - 1 result: stores contact, moves to ADDING_NOTE
+    SELECTING_CONTACT state. Searches for the lead.
+    - 1 result: stores lead, moves to ADDING_NOTE
     - 0 results: prompts again (stays in SELECTING_CONTACT)
     - Multiple: shows ReplyKeyboard with names; next message (exact name from keyboard)
       comes back to this same handler and matches as 1 result
     """
-    user = _get_user(update.effective_user.id)
-    user_id = user["fields"]["user_id"]
     query = update.message.text.strip()
 
-    matches = db.find_contact(query, user_id)
+    try:
+        matches = await db.find_leads(query)
+    except Exception as e:
+        logger.error(f"Lead search error: {e}")
+        await update.message.reply_text("Search failed\\. Try again or /cancel\\.", parse_mode="MarkdownV2")
+        return SELECTING_CONTACT
 
     if not matches:
         await update.message.reply_text(
-            "No contact found\\. Try a different name or /cancel\\.",
+            "No lead found\\. Try a different name or /cancel\\.",
             parse_mode="MarkdownV2",
         )
         return SELECTING_CONTACT
 
     if len(matches) == 1:
-        context.user_data["addnote"]["contact"] = matches[0]
-        name = matches[0]["fields"].get("name", "?")
+        context.user_data["addnote"]["lead"] = matches[0]
         await update.message.reply_text(
-            f"*{md(name)}* — what happened?",
+            f"*{md(matches[0]['contact_name'])}* — what happened?",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="MarkdownV2",
         )
         return ADDING_NOTE
 
     # Multiple matches — show keyboard so user picks exact name
-    buttons = [[m["fields"].get("name", "?")] for m in matches[:5]]
+    buttons = [[m["contact_name"]] for m in matches[:5]]
     await update.message.reply_text(
         "Multiple matches — pick one:",
         reply_markup=ReplyKeyboardMarkup(buttons, one_time_keyboard=True, resize_keyboard=True),
@@ -406,9 +498,10 @@ async def addnote_followup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _save_addnote(update: Update, context: ContextTypes.DEFAULT_TYPE, note_text: str):
-    """Writes the note to Airtable and sends confirmation."""
-    contact = context.user_data.get("addnote", {}).get("contact")
-    if not contact:
+    """Writes the note as an interaction and sends confirmation."""
+    data = context.user_data.get("addnote", {})
+    lead = data.get("lead")
+    if not lead:
         await update.message.reply_text(
             "Something went wrong\\. Try /addnote again\\.", parse_mode="MarkdownV2"
         )
@@ -416,16 +509,15 @@ async def _save_addnote(update: Update, context: ContextTypes.DEFAULT_TYPE, note
         return
 
     try:
-        db.log_interaction(
-            contact_id=contact["id"],
+        await db.log_interaction(
+            lead_id=lead["id"],
             type="addnote_command",
             raw_content=note_text,
             ai_summary=note_text,  # Manual notes are self-descriptive
-            telegram_message_id=update.message.message_id,
+            user_id=data.get("user_id"),
         )
-        name = contact["fields"].get("name", "Contact")
         await update.message.reply_text(
-            f"Note saved for *{md(name)}*\\.",
+            f"Note saved for *{md(lead['contact_name'])}*\\.",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="MarkdownV2",
         )
@@ -440,16 +532,15 @@ async def _save_addnote(update: Update, context: ContextTypes.DEFAULT_TYPE, note
 
 async def quick_note_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Quick note to the most recently updated contact.
-    If two contacts have the same last_updated timestamp, shows inline buttons to disambiguate.
+    Quick note to the most recently active lead.
+    If the top two leads share the same last_activity_at, shows inline buttons to disambiguate.
     """
     telegram_id = update.effective_user.id
-    user = _get_user(telegram_id)
+    user = await _get_user(telegram_id)
     if not user:
         await _not_registered(update)
         return
 
-    user_id = user["fields"]["user_id"]
     note_text = " ".join(context.args).strip() if context.args else ""
 
     if not note_text:
@@ -459,17 +550,14 @@ async def quick_note_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     try:
-        pipeline = db.get_all_contacts(user_id)
-        # Flatten dict-of-lists to a single list, then sort by last_updated descending
-        all_contacts = [rec for contacts in pipeline.values() for rec in contacts]
-        all_contacts.sort(
-            key=lambda r: r["fields"].get("last_updated", ""),
-            reverse=True,
-        )
-        latest = all_contacts[:2]
+        pipeline = await db.get_all_leads(_pipeline_scope(user))
+        all_leads = [lead for leads in pipeline.values() for lead in leads]
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
+        all_leads.sort(key=lambda l: l.get("last_activity_at") or epoch, reverse=True)
+        latest = all_leads[:2]
     except Exception as e:
         logger.error(f"Quick note pipeline fetch error: {e}")
-        await update.message.reply_text("Couldn't fetch contacts\\.", parse_mode="MarkdownV2")
+        await update.message.reply_text("Couldn't fetch leads\\.", parse_mode="MarkdownV2")
         return
 
     if not latest:
@@ -478,22 +566,21 @@ async def quick_note_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    # Unambiguous if only one contact, or top two have different timestamps
+    # Unambiguous if only one lead, or top two have different timestamps
     if len(latest) == 1 or (
-        latest[0]["fields"].get("last_updated") != latest[1]["fields"].get("last_updated")
+        latest[0].get("last_activity_at") != latest[1].get("last_activity_at")
     ):
-        rec = latest[0]
+        lead = latest[0]
         try:
-            db.log_interaction(
-                contact_id=rec["id"],
+            await db.log_interaction(
+                lead_id=lead["id"],
                 type="addnote_command",
                 raw_content=note_text,
                 ai_summary=note_text,
-                telegram_message_id=update.message.message_id,
+                user_id=user["id"],
             )
-            name = rec["fields"].get("name", "Contact")
             await update.message.reply_text(
-                f"Note added to *{md(name)}*\\.", parse_mode="MarkdownV2"
+                f"Note added to *{md(lead['contact_name'])}*\\.", parse_mode="MarkdownV2"
             )
         except Exception as e:
             logger.error(f"Quick note save error: {e}")
@@ -501,14 +588,17 @@ async def quick_note_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         # Same timestamp — ask which one
         context.user_data["quick_note_text"] = note_text
-        buttons = [[
-            InlineKeyboardButton(
-                f"{c['fields'].get('name', '?')} @ {c['fields'].get('company', '?')}",
-                callback_data=f"qnote:{c['id']}",
-            )
-        ] for c in latest]
+        buttons = []
+        for lead in latest:
+            company_name = await _company_name(lead)
+            buttons.append([
+                InlineKeyboardButton(
+                    f"{lead['contact_name']} @ {company_name or '?'}",
+                    callback_data=f"qnote:{lead['id']}",
+                )
+            ])
         await update.message.reply_text(
-            "Which contact is this note for?",
+            "Which lead is this note for?",
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -526,12 +616,11 @@ async def edit_stage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     """User tapped 'Edit stage' — replace buttons with a stage picker."""
     query = update.callback_query
     await query.answer()
-    record_id = query.data.split(":", 1)[1]
+    lead_id = query.data.split(":", 1)[1]
 
-    stages = ["Lead", "Evaluating", "Proposal Sent", "Negotiating", "Won", "Lost"]
     buttons = [
-        [InlineKeyboardButton(s, callback_data=f"set_stage:{record_id}:{s}")]
-        for s in stages
+        [InlineKeyboardButton(s, callback_data=f"set_stage:{lead_id}:{s}")]
+        for s in db.STAGES
     ]
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -539,20 +628,19 @@ async def edit_stage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def set_stage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Applies the chosen stage.
-    Callback format: "set_stage:{record_id}:{stage_name}"
-    Uses split(":", 2) so "Proposal Sent" (with a space, not colon) is preserved intact.
+    Callback format: "set_stage:{lead_id}:{stage_name}"
+    Uses split(":", 2) — stage names contain spaces/hyphens, so stage is the last segment.
     """
     query = update.callback_query
-    _, record_id, new_stage = query.data.split(":", 2)
+    _, lead_id_str, new_stage = query.data.split(":", 2)
+    lead_id = int(lead_id_str)
 
     try:
-        db.update_contact_stage(record_id, new_stage)
-        rec = db.get_contact_by_id(record_id)
-        name = rec["fields"].get("name", "Contact")
+        lead = await db.update_lead_stage(lead_id, new_stage)
         await query.answer("Stage updated!")
         await query.edit_message_reply_markup(reply_markup=None)
         await query.message.reply_text(
-            f"Stage updated: *{md(name)}* → *{md(new_stage)}*\\.",
+            f"Stage updated: *{md(lead['contact_name'])}* → *{md(new_stage)}*\\.",
             parse_mode="MarkdownV2",
         )
     except Exception as e:
@@ -561,26 +649,28 @@ async def set_stage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def quick_note_contact_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles contact selection when /note was ambiguous."""
+    """Handles lead selection when /note was ambiguous."""
     query = update.callback_query
     await query.answer()
-    record_id = query.data.split(":", 1)[1]
+    lead_id = int(query.data.split(":", 1)[1])
     note_text = context.user_data.pop("quick_note_text", "")
 
     if not note_text:
         await query.edit_message_text("Note text was lost\\. Try /note again\\.", parse_mode="MarkdownV2")
         return
 
+    user = await _get_user(update.effective_user.id)
+
     try:
-        db.log_interaction(
-            contact_id=record_id,
+        await db.log_interaction(
+            lead_id=lead_id,
             type="addnote_command",
             raw_content=note_text,
             ai_summary=note_text,
-            telegram_message_id=query.message.message_id,
+            user_id=user["id"] if user else None,
         )
-        rec = db.get_contact_by_id(record_id)
-        name = rec["fields"].get("name", "Contact")
+        lead = await db.get_lead_by_id(lead_id)
+        name = lead["contact_name"] if lead else "Lead"
         await query.edit_message_text(
             f"Note added to *{md(name)}*\\.", parse_mode="MarkdownV2"
         )

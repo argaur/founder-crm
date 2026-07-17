@@ -1,47 +1,43 @@
-# Rethink CRM — Conversation-First Sales Tool
+# Siteline — Coworking Lead Management That Runs Itself
 
-> A Telegram bot that turns WhatsApp conversation context into structured CRM data — zero new app, zero context-switching.
+> A Telegram bot + manager dashboard that turns forwarded WhatsApp conversations into a live coworking sales pipeline — built for Stylework's B2B Sales vertical (50-seat teams to 10,000-seat managed offices).
 
-**Stage:** PRD · Prototype &nbsp;|&nbsp; **Stack:** Python · Telegram Bot API · Claude AI · Supabase
+**Stage:** Working prototype, live-verified end to end &nbsp;|&nbsp; **Stack:** Python · Telegram Bot API · Claude API · Neon Postgres (asyncpg) · FastAPI · vanilla JS dashboard
 
 ---
 
 ## The Problem
 
-60–70% of founders abandon their CRM within 4 weeks. Not because they don't care about relationships — but because CRMs demand structured input at exactly the wrong moment. Founders already manage relationships inside WhatsApp. The tool had to meet them there.
+Stylework's B2B sales team currently runs lead management the way most coworking sales teams do: reps chase conversations across WhatsApp, calls, and site visits, and none of it becomes structured pipeline data until someone manually types it into a spreadsheet or CRM — usually after the fact, if at all. Deals stall silently. Managers have no live view of team-wide pipeline value or which leads have gone quiet.
 
 ## What I Built
 
-A Telegram bot that acts as the CRM interface. Founders forward conversation snippets, voice notes, or quick updates directly to the bot. Claude parses intent, extracts deal context (contact, stage, next action, sentiment), and writes structured records to a Supabase backend — without the founder ever opening a dashboard.
+A Telegram bot that acts as the entire capture interface — reps forward a WhatsApp chat, send a voice note, or share a screenshot, and Claude extracts the structured deal (contact, company, seat count, city, space type, budget, move-in date, pipeline stage) without the rep ever filling out a form. A FastAPI backend persists this to Postgres and exposes it through a manager dashboard showing team-wide funnel value, a rep leaderboard, and a stalled-deal list — with the bot automatically nudging the assigned rep by DM when a lead has gone quiet past its stage threshold, so the pipeline manages itself instead of needing a manager to chase it.
 
 Key design decisions:
-- **No new UI to learn** — the entire interface is a Telegram conversation
-- **AI does the structuring** — founders capture in natural language; Claude normalises it
-- **Progressive disclosure** — bot only asks clarifying questions when confidence is low
-- **Built on a 39-page PRD** informed by 10 founder interviews and analysis of 16 competing tools
+- **No new UI to learn** — the capture interface is a Telegram conversation reps already have open all day
+- **AI does the structuring** — reps forward natural-language conversation (including Hinglish); Claude normalises it into seat count, city, space type, budget, and pipeline stage
+- **Automated nudges, not another dashboard to check** — a background job DMs the rep directly when a deal stalls, rather than relying on a manager to notice
+- **Manager and rep views are separated by design** — the rep pipeline board answers "what do I move today," the manager funnel answers "where is the team's revenue and who's sitting on it" — kept as two screens with two auth scopes, not one overloaded view
 
-## Research
+## Architecture
 
-| Method | Output |
-|--------|--------|
-| 10 founder interviews | Pain point mapping + abandonment triggers |
-| 16 CRM tools analysed | Feature gap matrix + positioning whitespace |
-| 39-page PRD | Full problem definition, user stories, system design |
+Started as a single-user Airtable prototype (`founder-crm-bot` + `founder-crm-landing`), then migrated wholesale to a real multi-user backend once the Stylework B2B vertical was chosen: Postgres via `asyncpg` replaced Airtable end to end, every handler became async, and the dashboard was rewired from direct client-side Airtable calls (a real credential-exposure bug in the earlier prototype) to authenticated FastAPI endpoints with signed per-user tokens and server-verified roles.
 
 ## Tech Stack
 
 | Layer | Choice |
 |-------|--------|
-| Bot interface | Telegram Bot API (python-telegram-bot) |
-| AI / NLP | Claude API (Anthropic) |
-| Database | Supabase (PostgreSQL) |
-| Language | Python |
-| Hosting | Railway |
+| Bot interface | Telegram Bot API (python-telegram-bot v21, async) |
+| AI / NLP | Claude API (Anthropic, Haiku) + OpenAI Whisper for voice notes |
+| Database | Neon (serverless Postgres) via `asyncpg` |
+| Backend API | FastAPI, signed HMAC dashboard tokens, role-scoped endpoints |
+| Dashboard | Vanilla HTML/CSS/JS, no framework — Manrope/monochrome design system matched to Stylework's own brand |
+| Hosting | Railway (bot + API), GitHub Pages (landing + dashboard) |
 
 ## Links
 
-- **Landing page:** https://argaur.github.io/founder-crm-landing/
-- **Case study:** https://gauravg-portfolio.vercel.app/case-study-founder-crm.html
+- **Landing page:** https://argaur.github.io/founder-crm/
 - **Portfolio:** https://gauravg-portfolio.vercel.app
 
 ---

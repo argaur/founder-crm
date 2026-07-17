@@ -1,291 +1,343 @@
 """
-seed.py — Demo data for Founder CRM case study.
+seed.py — Demo data for the Siteline (Stylework B2B Sales CRM) case study.
+
+Seeds 1 manager + 2 reps and ~13 leads spread across every stage, several
+cities, and a mix of small (dedicated-desk) to large (managed-office) deal
+sizes, with a few interactions per lead and deliberately backdated
+`last_activity_at` on some so the heat score, stale-lead nudges, and the
+manager dashboard's stalled-leads list all have something real to show.
+
+`spaces` inventory rows are seeded separately by `scripts/apply_schema.py`
+(run once against a fresh DATABASE_URL) — this script only touches
+users/companies/leads/interactions.
 
 Usage:
   python seed.py --seed    Insert all demo data
-  python seed.py --clear   Delete all demo data
+  python seed.py --clear   Delete all demo data (only the rows this script created)
 """
 
 import argparse
+import asyncio
 from datetime import datetime, timezone, timedelta
-from db import create_user, users_table, contacts_table, interactions_table
 
-DEMO_USER_ID = "demo-gaurav-001"
+import db
 
-DEMO_USER = {
-    "user_id": DEMO_USER_ID,
-    "first_name": "Gaurav",
-    "email": "gaurav@rethink.systems",
-    "company": "Rethink Systems",
-}
+# Fixed negative telegram_ids mark these as seed rows (real Telegram ids are
+# positive) so --clear can find and delete exactly what --seed created,
+# without touching real users who've since /start'd the bot.
+MANAGER = {"telegram_id": -900001, "first_name": "Himanshu Rao", "email": "himanshu@stylework.city", "company": "Stylework", "role": "manager"}
+REPS = [
+    {"telegram_id": -900002, "first_name": "Priya Nair", "email": "priya@stylework.city", "company": "Stylework", "role": "rep"},
+    {"telegram_id": -900003, "first_name": "Arjun Dev", "email": "arjun@stylework.city", "company": "Stylework", "role": "rep"},
+]
+SEED_TELEGRAM_IDS = [MANAGER["telegram_id"]] + [r["telegram_id"] for r in REPS]
 
-def days_ago(n: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=n)).isoformat()
+now = datetime.now(timezone.utc)
 
 
-CONTACTS = [
+def days_ago(n: int) -> datetime:
+    return now - timedelta(days=n)
+
+
+# Each lead: which rep (0=Priya, 1=Arjun), company/city/space profile, stage,
+# a couple of interactions, and how many days ago the lead last moved (drives
+# heat score + staleness). Deliberately spans every stage, a range of seat
+# counts (4-desk deals to 500-seat managed offices), and several cities.
+LEADS = [
     {
-        "name": "Arjun Mehta",
-        "company": "TechCorp Solutions",
-        "role": "CTO",
-        "stage": "Negotiating",
-        "source": "whatsapp_forward",
-        "last_updated_days": 2,
+        "rep": 0, "company": "Zomato", "city": "Gurgaon", "contact_name": "Rohan Verma",
+        "contact_role": "Facilities Manager", "phone": "9810000001", "stage": "Proposal",
+        "seat_count": 200, "space_type": "Managed Office", "budget_per_seat": 7000,
+        "est_deal_value": 1400000, "move_in_date": "next month", "source": "whatsapp_forward",
+        "last_activity_days": 6,  # stale — sits in Proposal past the 3-day threshold
         "interactions": [
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Hey Gaurav, we've reviewed your proposal. The team loves it. Can we hop on a call tomorrow to finalize the pricing? We're looking at a 12-month contract.",
-                "ai_summary": "Arjun is ready to finalize. Team has approved the proposal. Wants to discuss pricing for a 12-month contract. High buying intent.",
-            },
-            {
-                "type": "voice_note",
-                "raw_content": "Just spoke with Arjun. He's concerned about the onboarding timeline. Wants it done in 2 weeks. Also asked about API access. I said we can do it.",
-                "ai_summary": "Concern raised about onboarding timeline — Arjun wants 2-week completion. API access confirmed. Gaurav committed to timeline.",
-            },
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Gaurav bhai, one more thing — our legal team needs a DPA before we sign. Can you send that over? Everything else looks good.",
-                "ai_summary": "Legal requires a Data Processing Agreement before contract sign-off. Blocker to closing — DPA needs to be sent urgently.",
-            },
+            {"type": "whatsapp_forward", "days_ago": 9,
+             "raw": "Hey, we're looking to shift 200 people to a managed office in Gurgaon, Cyber City area preferably. Budget is around 7k per seat.",
+             "summary": "Zomato needs 200-seat managed office in Gurgaon (Cyber City), ~₹7k/seat budget."},
+            {"type": "voice_note", "days_ago": 6,
+             "raw": "Bheja tha proposal Rohan ko, unhone bola internal review chal raha hai, next week tak update denge.",
+             "summary": "Proposal sent, Zomato doing internal review, update expected next week."},
         ],
     },
     {
-        "name": "Priya Sharma",
-        "company": "Razorpay",
-        "role": "VP Partnerships",
-        "stage": "Proposal Sent",
-        "source": "whatsapp_forward",
-        "last_updated_days": 4,
+        "rep": 0, "company": "Razorpay", "city": "Bangalore", "contact_name": "Anita Rao",
+        "contact_role": "Workplace Lead", "phone": "9810000002", "stage": "Negotiation",
+        "seat_count": 40, "space_type": "Private Cabin", "budget_per_seat": 9000,
+        "est_deal_value": 3600000, "move_in_date": "2026-08-15", "source": "voice_note",
+        "last_activity_days": 1,
         "interactions": [
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Hi Gaurav, thanks for the detailed deck. I've shared it with our partnerships team internally. We should have feedback by end of week.",
-                "ai_summary": "Proposal shared internally at Razorpay. Priya is the internal champion. Expecting feedback by end of week.",
-            },
-            {
-                "type": "voice_note",
-                "raw_content": "Priya called. She said the budget is tight this quarter but next quarter looks good. She's personally excited. Told her we can do a pilot.",
-                "ai_summary": "Budget constrained this quarter. Priya keen on Q2 start. Pilot option discussed as entry point. Keep warm.",
-            },
+            {"type": "voice_note", "days_ago": 5,
+             "raw": "Razorpay ka Anita, 40 seats private cabin chahiye Koramangala mein, demo bhi ho gaya achha laga unko.",
+             "summary": "Razorpay wants 40-seat private cabin in Koramangala, demo went well."},
+            {"type": "whatsapp_forward", "days_ago": 1,
+             "raw": "We like the space but the per-seat price is a bit high for our budget. Can you do 8500 instead of 9000? We'd sign this week.",
+             "summary": "Anita negotiating price down to ₹8500/seat, ready to sign this week if agreed."},
         ],
     },
     {
-        "name": "Rahul Gupta",
-        "company": "Swiggy",
-        "role": "Product Head",
-        "stage": "Evaluating",
-        "source": "whatsapp_forward",
-        "last_updated_days": 6,
+        "rep": 1, "company": "Cred", "city": "Mumbai", "contact_name": "Karan Mehta",
+        "contact_role": "COO", "phone": "9810000003", "stage": "Closed-Won",
+        "seat_count": 15, "space_type": "Dedicated Desk", "budget_per_seat": 10000,
+        "est_deal_value": 900000, "move_in_date": "2026-07-20", "source": "screenshot",
+        "last_activity_days": 2,
         "interactions": [
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Gaurav, we're evaluating 3 vendors right now including you. Can you send a comparison doc and also references from similar-scale companies?",
-                "ai_summary": "Swiggy in competitive evaluation with 3 vendors. Needs comparison doc and client references. Critical to respond quickly.",
-            },
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Also, does your platform handle 10L+ transactions per day? That's our current volume and we can't compromise on that.",
-                "ai_summary": "Scale requirement: 10L+ transactions/day. Hard requirement. Confirm platform capacity before next call.",
-            },
-            {
-                "type": "voice_note",
-                "raw_content": "Had a product walkthrough with Rahul's team. They were impressed with the dashboard. Main concern is integration with their internal tools.",
-                "ai_summary": "Product demo went well. Dashboard well-received. Integration with internal tooling is the key technical concern.",
-            },
+            {"type": "screenshot", "days_ago": 12,
+             "raw": "[Screenshot of WhatsApp] Karan: need 15 dedicated desks near BKC for a new pod, moving in end of July.",
+             "summary": "Cred needs 15 dedicated desks near BKC, moving in end of July."},
+            {"type": "whatsapp_forward", "days_ago": 2,
+             "raw": "Confirmed, we're going ahead. Please send the agreement, we'll sign by Friday.",
+             "summary": "Deal closed — Cred confirmed, agreement being signed."},
         ],
     },
     {
-        "name": "Sneha Patel",
-        "company": "Zepto",
-        "role": "Founder",
-        "stage": "Lead",
-        "source": "manual",
-        "last_updated_days": 8,
+        "rep": 1, "company": "Meesho", "city": "Bangalore", "contact_name": "Divya Shah",
+        "contact_role": "Admin Head", "phone": "9810000004", "stage": "Closed-Lost",
+        "seat_count": 60, "space_type": "Managed Office", "budget_per_seat": 6500,
+        "est_deal_value": 4680000, "move_in_date": None, "source": "whatsapp_forward",
+        "last_activity_days": 20,
         "interactions": [
-            {
-                "type": "manual_note",
-                "raw_content": "Met Sneha at SaaSBoomi Delhi. She's scaling ops rapidly and mentioned they need better B2B tooling. Said to follow up in 2 weeks.",
-                "ai_summary": "Warm intro at SaaSBoomi. Zepto in rapid ops scaling phase. Sneha open to follow-up in 2 weeks.",
-            },
+            {"type": "whatsapp_forward", "days_ago": 25,
+             "raw": "We're comparing you against 2 other coworking chains for a 60-seat managed office in Whitefield.",
+             "summary": "Meesho evaluating 60-seat managed office in Whitefield against 2 competitors."},
+            {"type": "voice_note", "days_ago": 20,
+             "raw": "Divya ne bola competitor ne better lock-in terms diye, hum unke saath ja rahe hain, sorry.",
+             "summary": "Lost to a competitor over lock-in terms."},
         ],
     },
     {
-        "name": "Vikram Singh",
-        "company": "Meesho",
-        "role": "CXO",
-        "stage": "Won",
-        "source": "whatsapp_forward",
-        "last_updated_days": 7,
+        "rep": 0, "company": "Groww", "city": "Bangalore", "contact_name": "Ananya Kumar",
+        "contact_role": "Head of Operations", "phone": "9810000005", "stage": "Qualified",
+        "seat_count": 80, "space_type": "Managed Office", "budget_per_seat": 8000,
+        "est_deal_value": 7680000, "move_in_date": "Q3 2026", "source": "whatsapp_forward",
+        "last_activity_days": 4,
         "interactions": [
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Gaurav, contract signed and payment initiated. Looking forward to working with you. Onboarding call Monday?",
-                "ai_summary": "Deal closed. Contract signed, payment initiated. Onboarding call scheduled for Monday.",
-            },
-            {
-                "type": "voice_note",
-                "raw_content": "Vikram's team had initial concerns about data security. I sent them our SOC2 report. They were satisfied immediately.",
-                "ai_summary": "Data security concern resolved by sharing SOC2 report. Removed the final blocker to closing.",
-            },
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Hey, just wanted to say the pilot results were fantastic. 40% reduction in ops overhead. Board loved it. Let's go full rollout.",
-                "ai_summary": "Pilot delivered 40% ops overhead reduction. Board approved full rollout.",
-            },
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Can you also rope in 2 more seats for my ops leads? I want them trained before we go live next month.",
-                "ai_summary": "Upsell: 2 additional seats for ops leads. Training required before go-live next month.",
-            },
-            {
-                "type": "voice_note",
-                "raw_content": "Final negotiation call done. They asked for a 10% discount on annual plan. I agreed. Closed at ₹18L ARR.",
-                "ai_summary": "Closed at ₹18L ARR after 10% discount on annual plan.",
-            },
+            {"type": "whatsapp_forward", "days_ago": 4,
+             "raw": "Hi, we're revisiting our office strategy — looking at 80 seats managed office, flexible on locality within Bangalore. Budget's healthy, around 8k/seat.",
+             "summary": "Groww wants 80-seat managed office in Bangalore, flexible locality, ~₹8k/seat budget — qualified lead."},
         ],
     },
     {
-        "name": "Ananya Kumar",
-        "company": "Groww",
-        "role": "Head of Operations",
-        "stage": "Evaluating",
-        "source": "whatsapp_forward",
-        "last_updated_days": 3,
+        "rep": 1, "company": "Dukaan", "city": "Pune", "contact_name": "Nisha Joshi",
+        "contact_role": "Co-founder", "phone": "9810000006", "stage": "Site Visit",
+        "seat_count": 25, "space_type": "Private Cabin", "budget_per_seat": 6000,
+        "est_deal_value": 1800000, "move_in_date": "next month", "source": "voice_note",
+        "last_activity_days": 1,
         "interactions": [
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Hi Gaurav, your intro email was well-timed. We're actually revisiting our ops stack this month. Can we do a 30-min call this week?",
-                "ai_summary": "Strong timing — Groww actively revisiting ops stack. Ananya initiated call request. High-intent inbound.",
-            },
-            {
-                "type": "voice_note",
-                "raw_content": "Discovery call done. Ananya's team of 12 is manually tracking ops in sheets. Clear pain point. She asked for a custom demo focused on reporting.",
-                "ai_summary": "12-person ops team on spreadsheets. Pain validated. Custom reporting demo requested as next step.",
-            },
+            {"type": "voice_note", "days_ago": 8,
+             "raw": "Nisha se baat hui, 25 seats cabin chahiye Baner mein, demo dekhna chahti hai.",
+             "summary": "Dukaan wants 25-seat cabin in Baner, requested a demo."},
+            {"type": "whatsapp_forward", "days_ago": 1,
+             "raw": "Site visit confirmed for tomorrow 11am at the Baner location. Bringing 2 co-founders along.",
+             "summary": "Site visit scheduled tomorrow 11am, 2 co-founders attending."},
         ],
     },
     {
-        "name": "Raj Kapoor",
-        "company": "CRED",
-        "role": "Business Dev",
-        "stage": "Lost",
-        "source": "whatsapp_forward",
-        "last_updated_days": 14,
+        "rep": 0, "company": "Swiggy", "city": "Hyderabad", "contact_name": "Rahul Gupta",
+        "contact_role": "Product Head", "phone": "9810000007", "stage": "Inquiry",
+        "seat_count": 300, "space_type": "Managed Office", "budget_per_seat": 6500,
+        "est_deal_value": 23400000, "move_in_date": None, "source": "screenshot",
+        "last_activity_days": 0,
         "interactions": [
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Gaurav, after careful consideration we've decided to go with an in-house solution. The team felt it aligned better with our existing infrastructure. Thanks for your time.",
-                "ai_summary": "Deal lost to in-house build. Not a competitor loss. CRED felt internal build fit their infra better.",
-            },
-            {
-                "type": "voice_note",
-                "raw_content": "Spoke with Raj post-loss. He said the decision was top-down from their CTO. Not about product quality. Suggested reconnecting in 6 months.",
-                "ai_summary": "Loss was CTO-driven, not product-driven. Door open for 6-month re-engagement.",
-            },
+            {"type": "screenshot", "days_ago": 0,
+             "raw": "[Screenshot] Rahul: exploring options for a 300-seat setup in Hyderabad, Hitech City preferred. Just gauging interest right now.",
+             "summary": "Swiggy exploring 300-seat managed office in Hyderabad Hitech City — early inquiry."},
         ],
     },
     {
-        "name": "Nisha Joshi",
-        "company": "Dukaan",
-        "role": "Co-founder",
-        "stage": "Proposal Sent",
-        "source": "voice_note",
-        "last_updated_days": 5,
+        "rep": 1, "company": "Fenix Apparel", "city": "Gurgaon", "contact_name": "Karan Malhotra",
+        "contact_role": "Procurement Head", "phone": "9810000008", "stage": "Proposal",
+        "seat_count": 12, "space_type": "Dedicated Desk", "budget_per_seat": 8000,
+        "est_deal_value": 1152000, "move_in_date": "2026-09-01", "source": "whatsapp_forward",
+        "last_activity_days": 7,
         "interactions": [
-            {
-                "type": "voice_note",
-                "raw_content": "Nisha called to say they loved the demo. She wants to move fast. Asked if we can customize the onboarding for vernacular language support.",
-                "ai_summary": "Strong post-demo enthusiasm. Customization ask: vernacular language support for onboarding.",
-            },
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Gaurav, sharing the proposal with our board this Friday. Can you send a one-pager version too? Something crisp for non-technical people.",
-                "ai_summary": "Board review Friday. One-pager needed for non-technical board members. Send before Thursday EOD.",
-            },
-            {
-                "type": "whatsapp_forward",
-                "raw_content": "Also, Dukaan has around 50k merchants. Any volume pricing available? Want to include that in our board presentation.",
-                "ai_summary": "Volume pricing query for 50k merchant base. Needs to be in board presentation. Prepare volume pricing tier.",
-            },
+            {"type": "whatsapp_forward", "days_ago": 10,
+             "raw": "Proposal bheja Karan ko, 12 dedicated desks Gurgaon mein, unhone bola pricing thoda high hai.",
+             "summary": "Sent proposal for 12 dedicated desks in Gurgaon — pricing pushback."},
+            {"type": "whatsapp_forward", "days_ago": 7,
+             "raw": "Discuss karenge next week negotiation call mein, abhi busy hain.",
+             "summary": "Will discuss pricing in a negotiation call next week — currently quiet."},
+        ],
+    },
+    {
+        "rep": 0, "company": "Solstice Interiors", "city": "Mumbai", "contact_name": "Aditi Rao",
+        "contact_role": "Owner", "phone": "9810000009", "stage": "Closed-Won",
+        "seat_count": 8, "space_type": "Day Pass", "budget_per_seat": 500,
+        "est_deal_value": 48000, "move_in_date": "2026-07-18", "source": "voice_note",
+        "last_activity_days": 3,
+        "interactions": [
+            {"type": "voice_note", "days_ago": 3,
+             "raw": "Aditi ne 8 day passes confirm kar diye, monthly package le rahi hain, chhota deal hai but confirmed.",
+             "summary": "Aditi confirmed 8 day passes, small monthly package deal closed."},
+        ],
+    },
+    {
+        "rep": 1, "company": "Redwood Systems", "city": "Delhi", "contact_name": "Meera Iyer",
+        "contact_role": "Ops Head", "phone": "9810000010", "stage": "Qualified",
+        "seat_count": 50, "space_type": "Dedicated Desk", "budget_per_seat": 9500,
+        "est_deal_value": 5700000, "move_in_date": None, "source": "whatsapp_forward",
+        "last_activity_days": 2,
+        "interactions": [
+            {"type": "whatsapp_forward", "days_ago": 2,
+             "raw": "Comparing three vendors including you for a 50-seat setup near Nehru Place, Delhi.",
+             "summary": "Redwood Systems comparing 3 vendors for 50-seat dedicated-desk setup near Nehru Place."},
+        ],
+    },
+    {
+        "rep": 0, "company": "Nimbus Cloud", "city": "Gurgaon", "contact_name": "Devansh Bhatt",
+        "contact_role": "CTO", "phone": "9810000011", "stage": "Negotiation",
+        "seat_count": 120, "space_type": "Managed Office", "budget_per_seat": 7500,
+        "est_deal_value": 10800000, "move_in_date": "Q3 2026", "source": "whatsapp_forward",
+        "last_activity_days": 5,
+        "interactions": [
+            {"type": "whatsapp_forward", "days_ago": 11,
+             "raw": "Nimbus needs 120 seats managed office, DLF Phase 3 area works well for our team.",
+             "summary": "Nimbus Cloud needs 120-seat managed office in DLF Phase 3, Gurgaon."},
+            {"type": "voice_note", "days_ago": 5,
+             "raw": "Devansh ki team 10% discount maang rahi annual plan pe, sochna padega.",
+             "summary": "Nimbus asking for 10% discount on annual plan — pending decision, quiet 5 days."},
+        ],
+    },
+    {
+        "rep": 1, "company": "Orion Traders", "city": "Pune", "contact_name": "Simran Kaur",
+        "contact_role": "Business Dev", "phone": "9810000012", "stage": "Closed-Lost",
+        "seat_count": 20, "space_type": "Dedicated Desk", "budget_per_seat": 5500,
+        "est_deal_value": 1320000, "move_in_date": None, "source": "voice_note",
+        "last_activity_days": 15,
+        "interactions": [
+            {"type": "voice_note", "days_ago": 18,
+             "raw": "Simran bola budget issue hai unka, 20 desks chahiye the Pune mein but ab shayad nahi.",
+             "summary": "Orion Traders had budget issues for 20-desk requirement in Pune."},
+            {"type": "whatsapp_forward", "days_ago": 15,
+             "raw": "Sorry, we've decided to hold off on the office move for now. Thanks for your time.",
+             "summary": "Orion Traders decided to hold off — deal lost."},
+        ],
+    },
+    {
+        "rep": 0, "company": "Skyline Foods", "city": "Delhi", "contact_name": "Arjun Kapoor",
+        "contact_role": "CTO", "phone": "9810000013", "stage": "Site Visit",
+        "seat_count": 35, "space_type": "Private Cabin", "budget_per_seat": 9000,
+        "est_deal_value": 3780000, "move_in_date": "next month", "source": "whatsapp_forward",
+        "last_activity_days": 0,
+        "interactions": [
+            {"type": "whatsapp_forward", "days_ago": 4,
+             "raw": "Comparing us with two other vendors, no budget discussed yet, wants a site visit first.",
+             "summary": "Skyline Foods comparing vendors, requested a site visit before budget talk."},
+            {"type": "whatsapp_forward", "days_ago": 0,
+             "raw": "Site visit went great, Arjun's team loved the Connaught Place location. Deciding this week.",
+             "summary": "Site visit completed, well received — decision expected this week."},
         ],
     },
 ]
 
 
-def seed():
-    print("Seeding demo data for Founder CRM...\n")
+async def seed():
+    print("Seeding Siteline demo data...\n")
+    await db.init_pool()
 
-    # Create demo user if not exists
-    existing = users_table.first(formula=f"{{user_id}}='{DEMO_USER_ID}'")
-    if existing:
-        print("Demo user already exists — skipping user creation.")
-    else:
-        create_user(
-            user_id=DEMO_USER["user_id"],
-            first_name=DEMO_USER["first_name"],
-            email=DEMO_USER["email"],
-            company=DEMO_USER["company"],
+    manager = await db.create_user(**MANAGER)
+    print(f"Created manager: {manager['first_name']} (user_id={manager['id']})")
+
+    rep_rows = []
+    for rep in REPS:
+        u = await db.create_user(**rep)
+        rep_rows.append(u)
+        print(f"Created rep: {u['first_name']} (user_id={u['id']})")
+    print()
+
+    pool = db._get_pool()
+
+    for lead_data in LEADS:
+        company = await db.find_or_create_company(lead_data["company"], city=lead_data["city"])
+        rep = rep_rows[lead_data["rep"]]
+
+        lead = await db.create_lead(
+            contact_name=lead_data["contact_name"],
+            company_id=company["id"],
+            contact_role=lead_data["contact_role"],
+            phone=lead_data["phone"],
+            stage=lead_data["stage"],
+            seat_count=lead_data["seat_count"],
+            city=lead_data["city"],
+            space_type=lead_data["space_type"],
+            budget_per_seat=lead_data["budget_per_seat"],
+            est_deal_value=lead_data["est_deal_value"],
+            move_in_date=lead_data["move_in_date"],
+            assigned_to=rep["id"],
+            source=lead_data["source"],
         )
-        print(f"Created demo user: {DEMO_USER['first_name']} ({DEMO_USER_ID})\n")
 
-    for contact_data in CONTACTS:
-        # Create contact with correct stage and past timestamp directly
-        rec = contacts_table.create({
-            "name": contact_data["name"],
-            "company": contact_data["company"],
-            "role": contact_data["role"],
-            "source": contact_data["source"],
-            "user_id": DEMO_USER_ID,
-            "stage": contact_data["stage"],
-            "interaction_count": len(contact_data["interactions"]),
-            "last_updated": days_ago(contact_data["last_updated_days"]),
-            "added_on": days_ago(contact_data["last_updated_days"] + 7),
-        })
-        rec_id = rec["id"]
+        for interaction in lead_data["interactions"]:
+            row = await db.log_interaction(
+                lead_id=lead["id"],
+                type=interaction["type"],
+                raw_content=interaction["raw"],
+                ai_summary=interaction["summary"],
+                user_id=rep["id"],
+            )
+            # log_interaction always stamps logged_at/last_activity_at as
+            # now() — backdate both directly so heat score, "days quiet" on
+            # the manager dashboard, and stale-lead nudges all reflect a
+            # realistic spread instead of everything looking freshly touched.
+            await pool.execute(
+                "UPDATE interactions SET logged_at = $1 WHERE id = $2",
+                days_ago(interaction["days_ago"]), row["id"],
+            )
 
-        # Log interactions directly (bypassing log_interaction to preserve past dates)
-        for interaction in contact_data["interactions"]:
-            interactions_table.create({
-                "contact_id": rec_id,
-                "type": interaction["type"],
-                "raw_content": interaction["raw_content"],
-                "ai_summary": interaction["ai_summary"],
-                "telegram_message_id": 0,
-                "logged_on": days_ago(contact_data["last_updated_days"]),
-            })
+        await pool.execute(
+            "UPDATE leads SET last_activity_at = $1 WHERE id = $2",
+            days_ago(lead_data["last_activity_days"]), lead["id"],
+        )
 
-        print(f"Created {contact_data['name']} @ {contact_data['company']} [{contact_data['stage']}] ✓")
+        print(f"  {lead_data['contact_name']} @ {lead_data['company']} "
+              f"[{lead_data['stage']}] - {lead_data['seat_count']} seats, {lead_data['city']} OK")
 
-    print("\nSeed complete! Open the dashboard to see all 8 deals.")
+    print(f"\nSeed complete! {len(LEADS)} leads across {len(rep_rows)} reps + 1 manager. "
+          f"Open the dashboard to see the pipeline.")
 
 
-def clear():
-    print("Clearing all demo data...\n")
+async def clear():
+    print("Clearing Siteline demo data...\n")
+    await db.init_pool()
+    pool = db._get_pool()
 
-    contacts = contacts_table.all(formula=f"{{user_id}}='{DEMO_USER_ID}'")
-    for rec in contacts:
-        interactions = interactions_table.all(formula=f"{{contact_id}}='{rec['id']}'")
-        for interaction in interactions:
-            interactions_table.delete(interaction["id"])
-        contacts_table.delete(rec["id"])
-        print(f"Deleted {rec['fields'].get('name', 'unknown')} + interactions ✓")
+    user_ids = [r["id"] for r in await pool.fetch(
+        "SELECT id FROM users WHERE telegram_id = ANY($1::bigint[])", SEED_TELEGRAM_IDS
+    )]
+    if not user_ids:
+        print("No seed users found — nothing to clear.")
+        return
 
-    user_rec = users_table.first(formula=f"{{user_id}}='{DEMO_USER_ID}'")
-    if user_rec:
-        users_table.delete(user_rec["id"])
-        print("Deleted demo user ✓")
+    lead_ids = [r["id"] for r in await pool.fetch(
+        "SELECT id FROM leads WHERE assigned_to = ANY($1::bigint[])", user_ids
+    )]
+    if lead_ids:
+        n = await pool.execute("DELETE FROM interactions WHERE lead_id = ANY($1::bigint[])", lead_ids)
+        print(f"Deleted interactions: {n}")
+        n = await pool.execute("DELETE FROM leads WHERE id = ANY($1::bigint[])", lead_ids)
+        print(f"Deleted leads: {n}")
+
+    company_names = list({ld["company"] for ld in LEADS})
+    n = await pool.execute(
+        "DELETE FROM companies WHERE name = ANY($1::text[]) "
+        "AND id NOT IN (SELECT company_id FROM leads WHERE company_id IS NOT NULL)",
+        company_names,
+    )
+    print(f"Deleted orphaned seed companies: {n}")
+
+    n = await pool.execute("DELETE FROM users WHERE id = ANY($1::bigint[])", user_ids)
+    print(f"Deleted seed users: {n}")
 
     print("\nClear complete.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Founder CRM demo data seeder")
+    parser = argparse.ArgumentParser(description="Siteline demo data seeder")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--seed", action="store_true", help="Insert demo data")
     group.add_argument("--clear", action="store_true", help="Delete all demo data")
     args = parser.parse_args()
 
     if args.seed:
-        seed()
+        asyncio.run(seed())
     elif args.clear:
-        clear()
+        asyncio.run(clear())

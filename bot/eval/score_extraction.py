@@ -6,12 +6,13 @@ and scores field-level accuracy on the deterministic/categorical fields only.
 Usage:   python eval/score_extraction.py [--min-accuracy 0.8] [--verbose]
 Example: python eval/score_extraction.py --min-accuracy 0.8
 
-Requires ANTHROPIC_API_KEY set (real API calls — small but non-zero cost, Haiku model,
+Requires OPENAI_API_KEY set (real API calls — small but non-zero cost, gpt-4o-mini,
 one call per dataset row). Never edit this file or dataset.jsonl to make the score pass —
 see README.md's read-only trust boundary rule.
 """
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -26,7 +27,16 @@ DATASET_PATH = Path(__file__).resolve().parent / "dataset.jsonl"
 # Fields scored by exact/presence match — free-text fields (summary, next_action) are
 # excluded from the scalar metric; grading prose needs a human or a second LLM-as-judge,
 # which reintroduces the non-determinism this metric is designed to avoid. See README.md.
-SCORED_FIELDS = ["stage", "contact_name_present", "company_present", "budget_signal_present"]
+# stage is categorical (one of db.STAGES or "unknown"); the rest are presence checks
+# against the B2B coworking extraction schema (ai.py's seat_count/city/budget_signal).
+SCORED_FIELDS = [
+    "stage",
+    "contact_name_present",
+    "company_present",
+    "budget_signal_present",
+    "seat_count_present",
+    "city_present",
+]
 
 
 def load_dataset():
@@ -60,6 +70,8 @@ def score_one(actual: dict, expected: dict) -> dict:
         ("contact_name_present", "contact_name"),
         ("company_present", "company"),
         ("budget_signal_present", "budget_signal"),
+        ("seat_count_present", "seat_count"),
+        ("city_present", "city"),
     ]:
         expected_present = expected.get(presence_field, False)
         actual_present = actual.get(actual_key) not in (None, "", "null")
@@ -75,8 +87,8 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Print per-example results")
     args = parser.parse_args()
 
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("ERROR: ANTHROPIC_API_KEY is not set — this script calls the real Anthropic API "
+    if not os.getenv("OPENAI_API_KEY"):
+        print("ERROR: OPENAI_API_KEY is not set — this script calls the real OpenAI API "
               "and cannot run without it.", file=sys.stderr)
         sys.exit(1)
 
@@ -88,27 +100,31 @@ def main():
     correct_fields = 0
     failures = []
 
-    for i, row in enumerate(rows, start=1):
-        transcript = row["transcript"]
-        expected = row["expected"]
+    async def run():
+        nonlocal total_fields, correct_fields
+        for i, row in enumerate(rows, start=1):
+            transcript = row["transcript"]
+            expected = row["expected"]
 
-        try:
-            actual = extract_from_voice(transcript)
-        except Exception as e:
-            print(f"ERROR: extraction failed on row {i}: {e}", file=sys.stderr)
-            actual = {}
+            try:
+                actual = await extract_from_voice(transcript)
+            except Exception as e:
+                print(f"ERROR: extraction failed on row {i}: {e}", file=sys.stderr)
+                actual = {}
 
-        field_results = score_one(actual, expected)
-        for field, correct in field_results.items():
-            total_fields += 1
-            if correct:
-                correct_fields += 1
-            else:
-                failures.append((i, field, expected.get(field), actual))
+            field_results = score_one(actual, expected)
+            for field, correct in field_results.items():
+                total_fields += 1
+                if correct:
+                    correct_fields += 1
+                else:
+                    failures.append((i, field, expected.get(field), actual))
 
-        if args.verbose:
-            status = "OK" if all(field_results.values()) else "MISS"
-            print(f"[{status}] row {i}: {field_results}")
+            if args.verbose:
+                status = "OK" if all(field_results.values()) else "MISS"
+                print(f"[{status}] row {i}: {field_results}")
+
+    asyncio.run(run())
 
     accuracy = correct_fields / total_fields if total_fields else 0.0
 

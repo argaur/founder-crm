@@ -3,30 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rethink CRM — Your conversations are already your CRM</title>
-  <meta name="description" content="Rethink CRM turns WhatsApp chats, voice notes, and screenshots into a live pipeline automatically. No manual entry. No learning curve." />
+  <title>Siteline — Coworking lead management that runs itself</title>
+  <meta name="description" content="Forward a WhatsApp message and Siteline stages the lead — seats, city, budget, move-in extracted by AI. Stale leads nudge the rep automatically. Managers see the whole team's pipeline live." />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
   <style>
     /* ── TOKENS ───────────────────────────────────────── */
     :root {
-      --bg:          #080706;
-      --surface:     #0F0E0C;
-      --surface-2:   #161410;
-      --border:      #252219;
-      --border-l:    #2E2A22;
-      --accent:      #E8920A;
-      --accent-dim:  rgba(232,146,10,0.10);
-      --accent-glow: rgba(232,146,10,0.22);
-      --text:        #EDE8DF;
-      --text-2:      #A09589;
-      --text-3:      #5C554D;
-      --serif:       'Cormorant Garamond', Georgia, serif;
-      --mono:        'DM Mono', monospace;
-      --sans:        'Outfit', system-ui, sans-serif;
+      --bg:        #FFFFFF;
+      --surface:   #FAFAF9;
+      --surface-2: #F3F3F1;
+      --border:    #EBEBE8;
+      --border-2:  #DDDDD9;
+      --ink:       #0A0A0A;
+      --text:      #0A0A0A;
+      --text-2:    #5C5C58;
+      --text-3:    #9A9A96;
+      --sans:      'Manrope', system-ui, sans-serif;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -36,69 +32,68 @@
       background: var(--bg);
       color: var(--text);
       font-family: var(--sans);
-      font-weight: 300;
-      line-height: 1.6;
+      font-weight: 400;
+      line-height: 1.65;
       -webkit-font-smoothing: antialiased;
-      cursor: crosshair;
     }
-    a, button { cursor: crosshair; }
+    a, button { cursor: pointer; }
 
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--border-l); border-radius: 2px; }
+    ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
 
     a:focus-visible, button:focus-visible {
-      outline: 1px solid var(--accent);
+      outline: 2px solid var(--ink);
       outline-offset: 3px;
     }
 
     /* ── TYPE UTILS ───────────────────────────────────── */
     .label {
-      font-family: var(--mono);
       font-size: 0.675rem;
-      font-weight: 400;
+      font-weight: 600;
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--text-3);
     }
-    .label-amber {
-      font-family: var(--mono);
+    .label-strong {
       font-size: 0.675rem;
-      font-weight: 500;
+      font-weight: 700;
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: var(--accent);
+      color: var(--ink);
     }
 
     /* ── BUTTONS ──────────────────────────────────────── */
     .btn-primary {
-      font-family: var(--mono);
+      font-family: var(--sans);
       font-size: 0.72rem;
-      font-weight: 500;
+      font-weight: 700;
       letter-spacing: 0.1em;
-      background: var(--accent);
-      color: #080706;
+      background: var(--ink);
+      color: #FFFFFF;
       border: none;
-      padding: 10px 22px;
+      border-radius: 8px;
+      padding: 12px 24px;
       transition: background 0.18s, transform 0.14s;
       display: inline-flex;
       align-items: center;
       gap: 6px;
     }
-    .btn-primary:hover { background: #F5A21A; transform: translateY(-1px); }
+    .btn-primary:hover { background: #2A2A28; transform: translateY(-1px); }
     .btn-primary:active { transform: translateY(0); }
 
     .btn-ghost {
-      font-family: var(--mono);
+      font-family: var(--sans);
       font-size: 0.72rem;
-      color: var(--text-3);
+      font-weight: 600;
+      color: var(--text-2);
       text-decoration: none;
       letter-spacing: 0.08em;
-      border-bottom: 1px solid var(--border-l);
+      border-bottom: 1px solid var(--border-2);
       padding-bottom: 2px;
       transition: color 0.18s, border-color 0.18s;
     }
-    .btn-ghost:hover { color: var(--text); border-color: var(--text-2); }
+    .btn-ghost:hover { color: var(--ink); border-color: var(--ink); }
 
     /* ── NAV ──────────────────────────────────────────── */
     nav {
@@ -106,51 +101,40 @@
       top: 0; left: 0; right: 0;
       z-index: 100;
       padding: 0 48px;
-      height: 58px;
+      height: 64px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: rgba(8,7,6,0.94);
+      background: rgba(255,255,255,0.92);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
     }
     .nav-logo {
-      font-family: var(--mono);
-      font-size: 0.8rem;
-      font-weight: 500;
-      color: var(--text);
-      letter-spacing: 0.08em;
+      font-size: 0.85rem;
+      font-weight: 800;
+      color: var(--ink);
+      letter-spacing: 0.14em;
       text-decoration: none;
     }
     .nav-right { display: flex; align-items: center; gap: 36px; }
     .nav-link {
-      font-family: var(--mono);
-      font-size: 0.68rem;
-      color: var(--text-3);
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-2);
       text-decoration: none;
       letter-spacing: 0.06em;
       transition: color 0.18s;
     }
-    .nav-link:hover { color: var(--text); }
+    .nav-link:hover { color: var(--ink); }
 
     /* ── HERO ─────────────────────────────────────────── */
     .hero-wrap {
       border-bottom: 1px solid var(--border);
-      position: relative;
-      overflow: hidden;
-    }
-    .hero-wrap::before {
-      content: '';
-      position: absolute;
-      top: 5%; right: -8%;
-      width: 700px; height: 700px;
-      background: radial-gradient(circle, rgba(232,146,10,0.055) 0%, transparent 65%);
-      pointer-events: none;
     }
     .hero {
-      max-width: 1380px;
+      max-width: 1280px;
       margin: 0 auto;
-      padding: 116px 48px 80px;
+      padding: 148px 48px 104px;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 72px;
@@ -162,50 +146,43 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 30px;
+      margin-bottom: 32px;
     }
     .tag-dot {
       width: 6px; height: 6px;
-      background: #4ADE80;
+      background: var(--ink);
       border-radius: 50%;
       animation: blink 2s ease infinite;
     }
     @keyframes blink {
       0%,100% { opacity:1; transform:scale(1); }
-      50% { opacity:0.55; transform:scale(0.82); }
+      50% { opacity:0.45; transform:scale(0.82); }
     }
     .hero-h1 {
-      font-family: var(--serif);
-      font-size: clamp(52px, 5.8vw, 86px);
-      font-weight: 300;
-      line-height: 1.03;
-      letter-spacing: -0.025em;
-      margin-bottom: 26px;
+      font-size: clamp(46px, 5.2vw, 76px);
+      font-weight: 800;
+      line-height: 1.04;
+      letter-spacing: -0.035em;
+      margin-bottom: 28px;
     }
-    .hero-h1 em { font-style: italic; color: var(--accent); }
+    .hero-h1 em { font-style: normal; color: var(--text-3); }
     .hero-sub {
       font-size: 1rem;
       color: var(--text-2);
       line-height: 1.75;
       max-width: 440px;
       margin-bottom: 40px;
-      font-weight: 300;
+      font-weight: 400;
     }
     .hero-ctas { display: flex; align-items: center; gap: 24px; }
 
     /* Hero right — pipeline visual */
     .pv {
-      background: var(--surface);
-      border: 1px solid var(--border-l);
-      border-radius: 2px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
       overflow: hidden;
-      position: relative;
-    }
-    .pv::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0; height: 1px;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      box-shadow: 0 16px 44px rgba(10,10,10,0.06);
     }
     .pv-bar {
       padding: 12px 16px;
@@ -213,26 +190,26 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      background: var(--surface-2);
+      background: var(--surface);
     }
     .pv-dots { display: flex; gap: 5px; }
     .pv-dot { width: 8px; height: 8px; border-radius: 50%; }
     .pv-url {
       flex: 1;
       text-align: center;
-      font-family: var(--mono);
       font-size: 0.65rem;
+      font-weight: 500;
       color: var(--text-3);
-      background: rgba(0,0,0,0.35);
+      background: var(--surface-2);
       padding: 3px 10px;
-      border-radius: 2px;
+      border-radius: 6px;
     }
 
     /* Chat bubbles */
     .pv-chat { padding: 16px; border-bottom: 1px solid var(--border); }
     .chat-lbl {
-      font-family: var(--mono);
       font-size: 0.58rem;
+      font-weight: 600;
       letter-spacing: 0.12em;
       color: var(--text-3);
       text-transform: uppercase;
@@ -240,18 +217,18 @@
     }
     .bubble {
       max-width: 86%;
-      padding: 8px 12px;
-      border-radius: 2px;
+      padding: 9px 12px;
+      border-radius: 8px;
       font-size: 0.775rem;
       color: var(--text-2);
       margin-bottom: 6px;
       line-height: 1.5;
       animation: fadein 0.5s ease both;
     }
-    .bubble-in  { background: var(--surface-2); border-left: 2px solid var(--border-l); }
+    .bubble-in  { background: var(--surface); border: 1px solid var(--border); }
     .bubble-out {
-      background: rgba(232,146,10,0.07);
-      border-left: 2px solid rgba(232,146,10,0.28);
+      background: var(--surface-2);
+      border-left: 2px solid var(--ink);
       margin-left: auto;
     }
     @keyframes fadein {
@@ -262,10 +239,10 @@
     /* Extract result */
     .pv-extract { padding: 16px; }
     .extract-lbl {
-      font-family: var(--mono);
       font-size: 0.58rem;
+      font-weight: 700;
       letter-spacing: 0.12em;
-      color: var(--accent);
+      color: var(--ink);
       text-transform: uppercase;
       margin-bottom: 12px;
     }
@@ -276,34 +253,36 @@
       margin-bottom: 7px;
     }
     .ek {
-      font-family: var(--mono);
       font-size: 0.65rem;
+      font-weight: 500;
       color: var(--text-3);
       width: 68px;
       flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
     }
     .ev {
-      font-family: var(--mono);
-      font-size: 0.65rem;
+      font-size: 0.68rem;
+      font-weight: 600;
       color: var(--text);
+      font-variant-numeric: tabular-nums;
     }
-    .ev.amber { color: var(--accent); }
+    .ev.strong { font-size: 0.8rem; font-weight: 800; letter-spacing: -0.01em; }
     .badge {
       display: inline-block;
-      font-family: var(--mono);
       font-size: 0.58rem;
-      padding: 2px 6px;
-      border-radius: 1px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 6px;
     }
-    .badge-amber {
-      background: rgba(232,146,10,0.14);
-      border: 1px solid rgba(232,146,10,0.28);
-      color: var(--accent);
+    .badge-ink {
+      background: var(--ink);
+      color: #FFFFFF;
     }
-    .badge-green {
-      background: rgba(74,222,128,0.09);
-      border: 1px solid rgba(74,222,128,0.22);
-      color: #4ADE80;
+    .badge-soft {
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      color: var(--text-2);
     }
 
     /* ── REVEAL ANIMATIONS ───────────────────────────── */
@@ -343,20 +322,20 @@
       align-items: center;
       gap: 10px;
       padding: 0 44px;
-      font-family: var(--mono);
-      font-size: 0.7rem;
+      font-size: 0.72rem;
+      font-weight: 500;
       color: var(--text-3);
       white-space: nowrap;
     }
-    .mi .dot { width: 3px; height: 3px; background: var(--accent); border-radius: 50%; flex-shrink: 0; }
-    .mi strong { color: var(--text-2); font-weight: 400; }
+    .mi .dot { width: 3px; height: 3px; background: var(--ink); border-radius: 50%; flex-shrink: 0; }
+    .mi strong { color: var(--text); font-weight: 700; }
 
     /* ── SECTIONS ─────────────────────────────────────── */
     .sec {
       border-top: 1px solid var(--border);
-      padding: 96px 48px;
+      padding: 112px 48px;
     }
-    .sec-inner { max-width: 1380px; margin: 0 auto; }
+    .sec-inner { max-width: 1280px; margin: 0 auto; }
 
     /* ── PROBLEM ──────────────────────────────────────── */
     .prob-grid {
@@ -366,14 +345,13 @@
       align-items: start;
     }
     .prob-h2 {
-      font-family: var(--serif);
-      font-size: clamp(34px, 3.8vw, 54px);
-      font-weight: 300;
-      line-height: 1.08;
-      letter-spacing: -0.02em;
+      font-size: clamp(32px, 3.4vw, 48px);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
       margin-bottom: 22px;
     }
-    .prob-h2 em { font-style: italic; color: var(--accent); }
+    .prob-h2 em { font-style: normal; color: var(--text-3); }
     .prob-body {
       font-size: 0.9375rem;
       color: var(--text-2);
@@ -381,11 +359,12 @@
       max-width: 420px;
     }
 
-    .compare { border: 1px solid var(--border); }
+    .compare { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
     .compare-head {
       display: grid;
       grid-template-columns: 1fr 1fr;
       border-bottom: 1px solid var(--border);
+      background: var(--surface);
     }
     .compare-col-head {
       padding: 14px 18px;
@@ -396,8 +375,8 @@
     .compare-col-head:first-child { border-right: 1px solid var(--border); }
     .ch-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .ch-label {
-      font-family: var(--mono);
       font-size: 0.65rem;
+      font-weight: 700;
       letter-spacing: 0.1em;
       text-transform: uppercase;
     }
@@ -418,19 +397,21 @@
     }
     .compare-cell:first-child { border-right: 1px solid var(--border); }
     .ci {
-      font-family: var(--mono);
       font-size: 0.72rem;
+      font-weight: 700;
       flex-shrink: 0;
       margin-top: 1px;
     }
-    .ci.r { color: #EF4444; }
-    .ci.g { color: #4ADE80; }
+    .ci.r { color: var(--text-3); }
+    .ci.g { color: var(--ink); }
 
     /* ── HOW IT WORKS ─────────────────────────────────── */
     .steps {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
     }
     .step {
       padding: 48px 40px;
@@ -440,19 +421,20 @@
     .step:last-child { border-right: none; }
     .step:hover { background: var(--surface); }
     .step-num {
-      font-family: var(--serif);
-      font-size: 96px;
-      font-weight: 300;
+      font-size: 88px;
+      font-weight: 800;
       line-height: 1;
-      color: var(--border-l);
+      letter-spacing: -0.04em;
+      color: var(--surface-2);
       margin-bottom: 30px;
       transition: color 0.28s;
+      font-variant-numeric: tabular-nums;
     }
-    .step:hover .step-num { color: rgba(232,146,10,0.35); }
+    .step:hover .step-num { color: var(--border-2); }
     .step-title {
-      font-family: var(--serif);
-      font-size: 1.45rem;
-      font-weight: 400;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
       margin-bottom: 12px;
     }
     .step-body { font-size: 0.875rem; color: var(--text-2); line-height: 1.75; }
@@ -461,30 +443,31 @@
     .features {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
+      gap: 24px;
     }
     .feature {
       background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
       padding: 40px;
-      transition: background 0.22s;
+      transition: border-color 0.22s, box-shadow 0.22s;
     }
-    .feature:hover { background: var(--surface); }
+    .feature:hover { border-color: var(--border-2); box-shadow: 0 12px 32px rgba(10,10,10,0.05); }
     .feat-icon {
-      width: 34px; height: 34px;
-      border: 1px solid var(--border-l);
+      width: 36px; height: 36px;
+      border: 1px solid var(--border-2);
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
       margin-bottom: 22px;
       transition: border-color 0.22s;
     }
-    .feature:hover .feat-icon { border-color: var(--accent); }
+    .feature:hover .feat-icon { border-color: var(--ink); }
     .feat-title {
-      font-family: var(--serif);
-      font-size: 1.25rem;
-      font-weight: 400;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
       margin-bottom: 11px;
     }
     .feat-body {
@@ -494,28 +477,24 @@
       margin-bottom: 16px;
     }
     .feat-code {
-      font-family: var(--mono);
-      font-size: 0.67rem;
-      color: var(--accent);
-      background: var(--accent-dim);
-      border: 1px solid rgba(232,146,10,0.18);
-      padding: 9px 12px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-2);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--ink);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 12px;
       line-height: 1.65;
+      font-variant-numeric: tabular-nums;
     }
 
     /* ── DASHBOARD ────────────────────────────────────── */
     .db-wrap {
-      border: 1px solid var(--border-l);
-      border-radius: 2px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
       overflow: hidden;
-      box-shadow: 0 40px 80px rgba(0,0,0,0.55);
-      position: relative;
-    }
-    .db-wrap::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0; height: 1px;
-      background: linear-gradient(90deg, transparent 10%, var(--accent) 50%, transparent 90%);
+      box-shadow: 0 28px 64px rgba(10,10,10,0.07);
     }
     .db-chrome {
       background: var(--surface);
@@ -530,14 +509,14 @@
     .db-url {
       flex: 1;
       text-align: center;
-      font-family: var(--mono);
       font-size: 0.64rem;
+      font-weight: 500;
       color: var(--text-3);
-      background: rgba(0,0,0,0.3);
+      background: var(--surface-2);
       padding: 3px 12px;
-      border-radius: 2px;
+      border-radius: 6px;
     }
-    .db-body { display: flex; }
+    .db-body { display: flex; background: var(--bg); }
     .db-sidebar {
       width: 154px;
       background: var(--surface);
@@ -546,11 +525,11 @@
       flex-shrink: 0;
     }
     .db-slbl {
-      font-family: var(--mono);
       font-size: 0.58rem;
-      letter-spacing: 0.12em;
+      font-weight: 800;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: var(--text-3);
+      color: var(--ink);
       padding: 0 8px;
       margin-bottom: 12px;
     }
@@ -559,16 +538,17 @@
       align-items: center;
       gap: 7px;
       padding: 7px 8px;
-      font-family: var(--mono);
       font-size: 0.64rem;
+      font-weight: 600;
       color: var(--text-3);
       margin-bottom: 2px;
-      border-radius: 1px;
+      border-radius: 6px;
     }
     .db-nav.active {
-      color: var(--accent);
-      background: var(--accent-dim);
-      border-left: 2px solid var(--accent);
+      color: var(--ink);
+      background: var(--surface-2);
+      border-left: 2px solid var(--ink);
+      border-radius: 0 6px 6px 0;
     }
     .db-main { flex: 1; padding: 18px; overflow: hidden; }
     .db-stats {
@@ -580,19 +560,21 @@
     .db-stat {
       background: var(--surface);
       border: 1px solid var(--border);
+      border-radius: 8px;
       padding: 12px;
       text-align: center;
     }
     .db-stat-num {
-      font-family: var(--serif);
-      font-size: 1.5rem;
-      font-weight: 600;
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
       line-height: 1;
-      margin-bottom: 4px;
+      margin-bottom: 5px;
+      font-variant-numeric: tabular-nums;
     }
     .db-stat-lbl {
-      font-family: var(--mono);
       font-size: 0.58rem;
+      font-weight: 600;
       color: var(--text-3);
       letter-spacing: 0.1em;
       text-transform: uppercase;
@@ -605,43 +587,47 @@
     .db-col {
       background: var(--surface);
       border: 1px solid var(--border);
+      border-radius: 8px;
       padding: 10px;
     }
     .db-col-h {
-      font-family: var(--mono);
       font-size: 0.58rem;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.1em;
       color: var(--text-3);
       margin-bottom: 8px;
     }
     .db-card {
-      background: var(--surface-2);
+      background: var(--bg);
       border: 1px solid var(--border);
+      border-radius: 6px;
       padding: 8px;
       margin-bottom: 6px;
     }
     .db-card-name {
-      font-family: var(--mono);
       font-size: 0.65rem;
+      font-weight: 700;
       color: var(--text);
       margin-bottom: 2px;
     }
     .db-card-co {
-      font-family: var(--mono);
       font-size: 0.58rem;
+      font-weight: 500;
       color: var(--text-3);
+      font-variant-numeric: tabular-nums;
     }
     .db-badge {
-      font-family: var(--mono);
       font-size: 0.54rem;
-      padding: 2px 5px;
-      border-radius: 1px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 2px 6px;
+      border-radius: 5px;
       float: right;
     }
-    .db-hot  { background: rgba(239,68,68,0.14); color: #EF4444; }
-    .db-warm { background: rgba(234,179,8,0.14); color: #EAB308; }
-    .db-cold { background: rgba(100,100,100,0.14); color: #6B7280; }
+    .db-hot  { background: var(--ink); color: #FFFFFF; }
+    .db-warm { background: var(--border-2); color: var(--text-2); }
+    .db-cold { background: var(--surface-2); color: var(--text-3); }
 
     /* ── TESTIMONIALS ─────────────────────────────────── */
     .testi-grid {
@@ -650,38 +636,38 @@
       gap: 40px;
     }
     .testi {
-      border-top: 1px solid var(--border);
+      border-top: 2px solid var(--ink);
       padding-top: 28px;
     }
     .testi-q {
-      font-family: var(--serif);
-      font-size: 1.05rem;
-      font-weight: 300;
-      font-style: italic;
-      line-height: 1.65;
+      font-size: 0.95rem;
+      font-weight: 500;
+      line-height: 1.7;
       color: var(--text);
       margin-bottom: 22px;
     }
     .testi-who { display: flex; align-items: center; gap: 12px; }
     .testi-av {
-      width: 30px; height: 30px;
-      border: 1px solid var(--border-l);
+      width: 32px; height: 32px;
+      background: var(--surface-2);
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: var(--mono);
-      font-size: 0.6rem;
-      color: var(--accent);
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--text-2);
       flex-shrink: 0;
     }
     .testi-name {
-      font-family: var(--mono);
-      font-size: 0.68rem;
+      font-size: 0.72rem;
+      font-weight: 700;
       color: var(--text);
     }
     .testi-role {
-      font-family: var(--mono);
-      font-size: 0.62rem;
+      font-size: 0.64rem;
+      font-weight: 500;
       color: var(--text-3);
       margin-top: 2px;
     }
@@ -689,29 +675,17 @@
     /* ── CTA ──────────────────────────────────────────── */
     .cta-sec {
       border-top: 1px solid var(--border);
-      padding: 120px 48px;
+      padding: 136px 48px;
       text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-    .cta-sec::before {
-      content: '';
-      position: absolute;
-      bottom: -20%; left: 50%;
-      transform: translateX(-50%);
-      width: 800px; height: 400px;
-      background: radial-gradient(ellipse, rgba(232,146,10,0.11) 0%, transparent 70%);
-      pointer-events: none;
     }
     .cta-h2 {
-      font-family: var(--serif);
-      font-size: clamp(40px, 5vw, 70px);
-      font-weight: 300;
+      font-size: clamp(38px, 4.6vw, 64px);
+      font-weight: 800;
       line-height: 1.06;
-      letter-spacing: -0.025em;
+      letter-spacing: -0.035em;
       margin-bottom: 18px;
     }
-    .cta-h2 em { font-style: italic; color: var(--accent); }
+    .cta-h2 em { font-style: normal; color: var(--text-3); }
     .cta-sub {
       font-size: 0.9375rem;
       color: var(--text-2);
@@ -721,8 +695,8 @@
     }
     .cta-note {
       margin-top: 14px;
-      font-family: var(--mono);
-      font-size: 0.65rem;
+      font-size: 0.68rem;
+      font-weight: 500;
       color: var(--text-3);
       letter-spacing: 0.06em;
     }
@@ -736,21 +710,21 @@
       justify-content: space-between;
     }
     .foot-brand {
-      font-family: var(--mono);
-      font-size: 0.7rem;
+      font-size: 0.72rem;
+      font-weight: 500;
       color: var(--text-3);
     }
-    .foot-brand strong { color: var(--text-2); font-weight: 400; }
+    .foot-brand strong { color: var(--text); font-weight: 800; letter-spacing: 0.1em; }
     .foot-links { display: flex; align-items: center; gap: 32px; }
     .foot-link {
-      font-family: var(--mono);
-      font-size: 0.65rem;
+      font-size: 0.68rem;
+      font-weight: 600;
       color: var(--text-3);
       text-decoration: none;
       letter-spacing: 0.06em;
       transition: color 0.18s;
     }
-    .foot-link:hover { color: var(--text); }
+    .foot-link:hover { color: var(--ink); }
 
     /* ── MODAL ────────────────────────────────────────── */
     #signup-modal {
@@ -761,7 +735,7 @@
       align-items: center;
       justify-content: center;
       padding: 24px;
-      background: rgba(0,0,0,0.82);
+      background: rgba(10,10,10,0.4);
       backdrop-filter: blur(8px);
       opacity: 0;
       pointer-events: none;
@@ -769,9 +743,10 @@
     }
     #signup-modal.open { opacity: 1; pointer-events: all; }
     .modal-box {
-      background: var(--surface);
-      border: 1px solid var(--border-l);
-      border-top: 2px solid var(--accent);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 32px 80px rgba(10,10,10,0.14);
       padding: 36px;
       width: 100%;
       max-width: 410px;
@@ -788,41 +763,44 @@
       padding: 4px;
       transition: color 0.18s;
     }
-    .modal-close:hover { color: var(--text); }
+    .modal-close:hover { color: var(--ink); }
     .modal-title {
-      font-family: var(--serif);
-      font-size: 1.35rem;
-      font-weight: 400;
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
       margin-bottom: 5px;
     }
     .modal-sub {
-      font-family: var(--mono);
-      font-size: 0.68rem;
+      font-size: 0.72rem;
+      font-weight: 500;
       color: var(--text-3);
       margin-bottom: 26px;
     }
     .modal-field {
       width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border-l);
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: 8px;
       color: var(--text);
-      font-family: var(--mono);
-      font-size: 0.78rem;
+      font-family: var(--sans);
+      font-size: 0.8rem;
+      font-weight: 500;
       padding: 12px 14px;
       margin-bottom: 9px;
       outline: none;
       transition: border-color 0.18s;
     }
     .modal-field::placeholder { color: var(--text-3); }
-    .modal-field:focus { border-color: var(--accent); }
+    .modal-field:focus { border-color: var(--ink); }
     .modal-btn {
       width: 100%;
-      background: var(--accent);
-      color: var(--bg);
+      background: var(--ink);
+      color: #FFFFFF;
       border: none;
-      font-family: var(--mono);
+      border-radius: 8px;
+      font-family: var(--sans);
       font-size: 0.75rem;
-      font-weight: 500;
+      font-weight: 700;
       letter-spacing: 0.1em;
       padding: 14px;
       display: flex;
@@ -831,36 +809,38 @@
       gap: 8px;
       transition: background 0.18s;
     }
-    .modal-btn:hover { background: #F5A21A; }
+    .modal-btn:hover { background: #2A2A28; }
     .modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .modal-error {
       display: none;
       margin-top: 10px;
-      font-family: var(--mono);
-      font-size: 0.68rem;
-      color: #EF4444;
-      background: rgba(239,68,68,0.07);
-      border: 1px solid rgba(239,68,68,0.18);
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #B91C1C;
+      background: #FDF3F2;
+      border: 1px solid #F3DBD8;
+      border-radius: 8px;
       padding: 9px 12px;
     }
     .modal-success { display: none; margin-top: 14px; }
     .modal-success-box {
-      background: rgba(74,222,128,0.06);
-      border: 1px solid rgba(74,222,128,0.2);
+      background: #F5F9F5;
+      border: 1px solid #DCE8DC;
+      border-radius: 8px;
       padding: 14px;
       margin-bottom: 12px;
     }
     .ms-title {
-      font-family: var(--mono);
-      font-size: 0.68rem;
-      color: #4ADE80;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #15803D;
       letter-spacing: 0.08em;
       margin-bottom: 4px;
     }
     .ms-body {
-      font-family: var(--mono);
-      font-size: 0.64rem;
-      color: var(--text-3);
+      font-size: 0.66rem;
+      font-weight: 500;
+      color: var(--text-2);
       line-height: 1.6;
     }
     .modal-dash-btn {
@@ -869,17 +849,17 @@
       justify-content: center;
       gap: 8px;
       width: 100%;
-      background: var(--accent);
-      color: var(--bg);
-      font-family: var(--mono);
+      background: var(--ink);
+      color: #FFFFFF;
+      border-radius: 8px;
       font-size: 0.72rem;
-      font-weight: 500;
+      font-weight: 700;
       letter-spacing: 0.08em;
       padding: 13px;
       text-decoration: none;
       transition: background 0.18s;
     }
-    .modal-dash-btn:hover { background: #F5A21A; }
+    .modal-dash-btn:hover { background: #2A2A28; }
 
     @keyframes spin {
       from { transform: rotate(0deg); }
@@ -890,10 +870,10 @@
     @media (max-width: 960px) {
       nav { padding: 0 24px; }
       .nav-link { display: none; }
-      .hero { grid-template-columns: 1fr; gap: 44px; padding: 96px 24px 60px; }
+      .hero { grid-template-columns: 1fr; gap: 44px; padding: 108px 24px 64px; }
       .hero-right { order: -1; }
-      .hero-h1 { font-size: clamp(42px, 9vw, 64px); }
-      .sec { padding: 64px 24px; }
+      .hero-h1 { font-size: clamp(40px, 8.5vw, 58px); }
+      .sec { padding: 72px 24px; }
       .prob-grid { grid-template-columns: 1fr; gap: 44px; }
       .steps { grid-template-columns: 1fr; }
       .step { border-right: none; border-bottom: 1px solid var(--border); }
@@ -904,7 +884,7 @@
       .db-stats { grid-template-columns: repeat(2, 1fr); }
       .db-pipe { grid-template-columns: repeat(2, 1fr); }
       footer { flex-direction: column; gap: 18px; text-align: center; }
-      .cta-sec { padding: 72px 24px; }
+      .cta-sec { padding: 80px 24px; }
     }
     @media (max-width: 580px) {
       .hero-ctas { flex-direction: column; align-items: flex-start; }
@@ -922,10 +902,10 @@
 
 <!-- ── NAV ──────────────────────────────────────────────── -->
 <nav>
-  <a href="#" class="nav-logo">RETHINK CRM</a>
+  <a href="#" class="nav-logo">SITELINE</a>
   <div class="nav-right">
     <a href="#how-it-works" class="nav-link">How it works</a>
-    <button class="btn-primary" onclick="openModal()">START FREE →</button>
+    <button class="btn-primary" onclick="openModal()">GET THE BOT →</button>
   </div>
 </nav>
 
@@ -935,19 +915,20 @@
     <div>
       <div class="hero-tag reveal d1">
         <span class="tag-dot"></span>
-        <span class="label-amber">Built for founders who sell personally</span>
+        <span class="label-strong">For teams selling seats, cabins &amp; managed offices</span>
       </div>
       <h1 class="hero-h1 reveal d2">
-        Your conversations<br />
-        are <em>already</em><br />
-        your CRM.
+        Lead management<br />
+        that runs<br />
+        <em>itself.</em>
       </h1>
       <p class="hero-sub reveal d3">
-        Forward a WhatsApp chat. Record a voice note. Send a screenshot.
-        Rethink CRM reads it, extracts the deal, and updates your pipeline — automatically.
+        A rep forwards a WhatsApp chat. AI reads the seat count, city, and budget,
+        stages the lead, and nudges the rep when it goes quiet. Managers watch the
+        whole pipeline move — without asking anyone for an update.
       </p>
       <div class="hero-ctas reveal d4">
-        <button class="btn-primary" onclick="openModal()">START FREE →</button>
+        <button class="btn-primary" onclick="openModal()">GET THE BOT →</button>
         <a href="#how-it-works" class="btn-ghost">see how it works</a>
       </div>
     </div>
@@ -956,25 +937,27 @@
       <div class="pv">
         <div class="pv-bar">
           <div class="pv-dots">
-            <div class="pv-dot" style="background:rgba(239,68,68,0.4)"></div>
-            <div class="pv-dot" style="background:rgba(234,179,8,0.4)"></div>
-            <div class="pv-dot" style="background:rgba(74,222,128,0.4)"></div>
+            <div class="pv-dot" style="background:var(--border-2)"></div>
+            <div class="pv-dot" style="background:var(--border-2)"></div>
+            <div class="pv-dot" style="background:var(--border-2)"></div>
           </div>
-          <div class="pv-url">telegram → rethinkcrm_bot</div>
+          <div class="pv-url">telegram → siteline_bot</div>
         </div>
         <div class="pv-chat">
           <div class="chat-lbl">Forwarded from WhatsApp</div>
-          <div class="bubble bubble-in" style="animation-delay:0.9s">"Hey, we loved the demo. Budget approved — ₹6L. Can we do a contract call this week?"</div>
+          <div class="bubble bubble-in" style="animation-delay:0.9s">"Hi Priya, we're finalising our Gurgaon expansion — around 200 seats, ideally a managed office. Move-in by August. Can you share per-seat pricing?"</div>
           <div class="bubble bubble-out" style="animation-delay:1.2s">→ forwarded to bot</div>
         </div>
         <div class="pv-extract">
           <div class="extract-lbl">⬡ Claude extracted</div>
-          <div class="er"><span class="ek">contact</span><span class="ev">Arjun Mehta</span></div>
-          <div class="er"><span class="ek">company</span><span class="ev">TechCorp</span></div>
-          <div class="er"><span class="ek">stage</span><span class="ev"><span class="badge badge-amber">Negotiating</span></span></div>
-          <div class="er"><span class="ek">budget</span><span class="ev amber">₹6,00,000</span></div>
-          <div class="er"><span class="ek">next</span><span class="ev">Contract call this week</span></div>
-          <div class="er"><span class="ek">signal</span><span class="ev"><span class="badge badge-green">Hot ↑</span></span></div>
+          <div class="er"><span class="ek">contact</span><span class="ev">Rohan Verma</span></div>
+          <div class="er"><span class="ek">company</span><span class="ev">Vantage Analytics</span></div>
+          <div class="er"><span class="ek">seats</span><span class="ev">200 · managed office</span></div>
+          <div class="er"><span class="ek">city</span><span class="ev">Gurgaon</span></div>
+          <div class="er"><span class="ek">move-in</span><span class="ev">August</span></div>
+          <div class="er"><span class="ek">value</span><span class="ev strong">₹1.4 Cr est.</span></div>
+          <div class="er"><span class="ek">stage</span><span class="ev"><span class="badge badge-ink">Inquiry</span></span></div>
+          <div class="er"><span class="ek">assigned</span><span class="ev"><span class="badge badge-soft">Priya · auto</span></span></div>
         </div>
       </div>
     </div>
@@ -984,19 +967,19 @@
 <!-- ── MARQUEE ───────────────────────────────────────────── -->
 <div class="marquee-wrap">
   <div class="marquee-track">
-    <div class="mi"><span class="dot"></span><strong>Forward a chat</strong> → deal created in 4 seconds</div>
-    <div class="mi"><span class="dot"></span>No manual entry · No spreadsheet · No abandoned CRM</div>
-    <div class="mi"><span class="dot"></span><strong>/context Priya</strong> → last discussion, budget, next step — instantly</div>
-    <div class="mi"><span class="dot"></span>Works on WhatsApp · Voice Notes · Screenshots · LinkedIn DMs</div>
-    <div class="mi"><span class="dot"></span><strong>/ask who should I follow up today?</strong> → AI answers from your data</div>
-    <div class="mi"><span class="dot"></span>Stale deal nudges with full context · Never lose a follow-up again</div>
+    <div class="mi"><span class="dot"></span><strong>Forward a WhatsApp chat</strong> → staged lead in 4 seconds</div>
+    <div class="mi"><span class="dot"></span>Seats · city · budget · move-in — extracted, not typed</div>
+    <div class="mi"><span class="dot"></span>5 days quiet in Proposal → <strong>the rep gets nudged automatically</strong></div>
+    <div class="mi"><span class="dot"></span><strong>/ask what's stuck in Negotiation?</strong> → answered from live pipeline</div>
+    <div class="mi"><span class="dot"></span>Works on WhatsApp forwards · Voice notes · Screenshots</div>
+    <div class="mi"><span class="dot"></span>One screen for managers: funnel · leaderboard · stalled deals</div>
     <!-- duplicate for seamless loop -->
-    <div class="mi"><span class="dot"></span><strong>Forward a chat</strong> → deal created in 4 seconds</div>
-    <div class="mi"><span class="dot"></span>No manual entry · No spreadsheet · No abandoned CRM</div>
-    <div class="mi"><span class="dot"></span><strong>/context Priya</strong> → last discussion, budget, next step — instantly</div>
-    <div class="mi"><span class="dot"></span>Works on WhatsApp · Voice Notes · Screenshots · LinkedIn DMs</div>
-    <div class="mi"><span class="dot"></span><strong>/ask who should I follow up today?</strong> → AI answers from your data</div>
-    <div class="mi"><span class="dot"></span>Stale deal nudges with full context · Never lose a follow-up again</div>
+    <div class="mi"><span class="dot"></span><strong>Forward a WhatsApp chat</strong> → staged lead in 4 seconds</div>
+    <div class="mi"><span class="dot"></span>Seats · city · budget · move-in — extracted, not typed</div>
+    <div class="mi"><span class="dot"></span>5 days quiet in Proposal → <strong>the rep gets nudged automatically</strong></div>
+    <div class="mi"><span class="dot"></span><strong>/ask what's stuck in Negotiation?</strong> → answered from live pipeline</div>
+    <div class="mi"><span class="dot"></span>Works on WhatsApp forwards · Voice notes · Screenshots</div>
+    <div class="mi"><span class="dot"></span>One screen for managers: funnel · leaderboard · stalled deals</div>
   </div>
 </div>
 
@@ -1007,46 +990,45 @@
     <div class="prob-grid">
       <div>
         <h2 class="prob-h2">
-          CRMs don't fail<br />
-          because of <em>bad<br />software.</em><br />
-          They fail because<br />
-          founders don't log.
+          B2B coworking sales<br />
+          still runs on<br />
+          <em>people chasing<br />people.</em>
         </h2>
         <p class="prob-body">
-          You're managing 50–150 conversations across WhatsApp, LinkedIn, and email. Context lives in your head. Follow-ups get missed. The CRM is always one step behind — because you are.
+          A 50-seat inquiry and a 10,000-seat managed-office mandate arrive the same way — a WhatsApp message to a rep. Then someone has to type it into a CRM, remember the site visit, chase the proposal, and brief the manager. Every step that depends on someone remembering is a step where revenue leaks.
         </p>
       </div>
       <div>
         <div class="compare">
           <div class="compare-head">
             <div class="compare-col-head">
-              <span class="ch-dot" style="background:#EF4444;opacity:0.6"></span>
+              <span class="ch-dot" style="background:var(--text-3)"></span>
               <span class="ch-label" style="color:var(--text-3)">Traditional CRM</span>
             </div>
             <div class="compare-col-head">
-              <span class="ch-dot" style="background:var(--accent)"></span>
-              <span class="ch-label" style="color:var(--accent)">Rethink CRM</span>
+              <span class="ch-dot" style="background:var(--ink)"></span>
+              <span class="ch-label" style="color:var(--ink)">Siteline</span>
             </div>
           </div>
           <div class="compare-row">
-            <div class="compare-cell"><span class="ci r">✕</span>Manual data entry after every call</div>
-            <div class="compare-cell"><span class="ci g">✓</span>Forward a conversation — deal is created</div>
+            <div class="compare-cell"><span class="ci r">✕</span>Reps type in leads after the WhatsApp already happened</div>
+            <div class="compare-cell"><span class="ci g">✓</span>Forward the message — the lead stages itself</div>
           </div>
           <div class="compare-row">
-            <div class="compare-cell"><span class="ci r">✕</span>Complicated setup. Takes days</div>
-            <div class="compare-cell"><span class="ci g">✓</span>Running in 60 seconds. Zero setup</div>
+            <div class="compare-cell"><span class="ci r">✕</span>Seat counts and budgets live in chat scrollback</div>
+            <div class="compare-cell"><span class="ci g">✓</span>Seats, city, budget, move-in — structured and searchable</div>
           </div>
           <div class="compare-row">
-            <div class="compare-cell"><span class="ci r">✕</span>Designed for sales teams, not solo founders</div>
-            <div class="compare-cell"><span class="ci g">✓</span>Built for founders who sell personally</div>
+            <div class="compare-cell"><span class="ci r">✕</span>Follow-ups depend on reps remembering</div>
+            <div class="compare-cell"><span class="ci g">✓</span>Quiet leads nudge the assigned rep automatically</div>
           </div>
           <div class="compare-row">
-            <div class="compare-cell"><span class="ci r">✕</span>Abandoned within 3 weeks on average</div>
-            <div class="compare-cell"><span class="ci g">✓</span>Works through Telegram — where you already are</div>
+            <div class="compare-cell"><span class="ci r">✕</span>Managers collect status in standups and spreadsheets</div>
+            <div class="compare-cell"><span class="ci g">✓</span>Team funnel, leaderboard, stalled deals — live</div>
           </div>
           <div class="compare-row">
-            <div class="compare-cell"><span class="ci r">✕</span>Pipeline only as good as your logging</div>
-            <div class="compare-cell"><span class="ci g">✓</span>AI fills in the context. You just sell</div>
+            <div class="compare-cell"><span class="ci r">✕</span>"Where are we on the 800-seat deal?" takes a meeting</div>
+            <div class="compare-cell"><span class="ci g">✓</span>/ask answers it in one message</div>
           </div>
         </div>
       </div>
@@ -1058,27 +1040,27 @@
 <div class="sec" id="how-it-works">
   <div class="sec-inner">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:44px;flex-wrap:wrap;gap:12px">
-      <h2 style="font-family:var(--serif);font-size:clamp(28px,3vw,40px);font-weight:300">Three steps. That's it.</h2>
-      <span class="label">No learning curve</span>
+      <h2 style="font-size:clamp(28px,3vw,40px);font-weight:800;letter-spacing:-0.03em">Three steps. That's it.</h2>
+      <span class="label">Zero training for reps</span>
     </div>
     <div class="steps">
       <div class="step">
         <div class="step-num">01</div>
         <span class="label" style="display:block;margin-bottom:14px">Forward</span>
-        <h3 class="step-title">Send a conversation to your bot</h3>
-        <p class="step-body">Copy a WhatsApp chat, record a voice note after a call, or send a screenshot. Forward it to your Rethink CRM bot on Telegram. Any format works.</p>
+        <h3 class="step-title">A rep forwards the conversation</h3>
+        <p class="step-body">A WhatsApp chat, a voice note recorded after a site visit, or a screenshot of an email — sent to the team's Telegram bot. That is the entire data-entry workflow.</p>
       </div>
       <div class="step">
         <div class="step-num">02</div>
         <span class="label" style="display:block;margin-bottom:14px">Extract</span>
-        <h3 class="step-title">AI extracts full deal context</h3>
-        <p class="step-body">Claude reads the conversation and pulls out contact name, company, deal stage, budget signal, next action, and sentiment. Automatically. In seconds.</p>
+        <h3 class="step-title">AI reads it like a rep would</h3>
+        <p class="step-body">Claude pulls out the company, contact, seat count, city, space type, budget per seat, and move-in date — and stages the lead from Inquiry to Negotiation based on what was actually said.</p>
       </div>
       <div class="step">
         <div class="step-num">03</div>
-        <span class="label" style="display:block;margin-bottom:14px">Update</span>
-        <h3 class="step-title">Pipeline updates itself</h3>
-        <p class="step-body">Your dashboard reflects the deal instantly. No forms. No pipeline to update manually. The conversation is the record. You just sell.</p>
+        <span class="label" style="display:block;margin-bottom:14px">Run</span>
+        <h3 class="step-title">The pipeline runs itself</h3>
+        <p class="step-body">The lead lands staged, valued, and assigned. If it goes quiet past its stage threshold, the rep gets nudged with full context. The manager's funnel updates without anyone filing a report.</p>
       </div>
     </div>
   </div>
@@ -1088,39 +1070,39 @@
 <div class="sec">
   <div class="sec-inner">
     <div style="margin-bottom:44px">
-      <h2 style="font-family:var(--serif);font-size:clamp(28px,3vw,42px);font-weight:300;margin-bottom:8px">Changes behavior,<br /><em style="font-style:italic;color:var(--accent)">not just workflow.</em></h2>
-      <span class="label">Built for how founders actually work</span>
+      <h2 style="font-size:clamp(28px,3vw,42px);font-weight:800;letter-spacing:-0.03em;margin-bottom:8px">It doesn't remind you to chase.<br /><em style="font-style:normal;color:var(--text-3)">It chases.</em></h2>
+      <span class="label">Built for how coworking deals actually move</span>
     </div>
     <div class="features">
       <div class="feature">
         <div class="feat-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--ink)">
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
           </svg>
         </div>
-        <h3 class="feat-title">Never miss a follow-up</h3>
-        <p class="feat-body">The bot tracks inactivity per deal stage. When a deal goes cold, you get a nudge — with full context on what was last discussed.</p>
-        <div class="feat-code">"Arjun @ TechCorp hasn't moved<br/>in 3 days. Last: Proposal Sent."</div>
+        <h3 class="feat-title">Stale leads chase themselves</h3>
+        <p class="feat-body">Every stage has a quiet threshold. When a lead sits past it, the assigned rep gets a DM with full context and one-tap actions — before the manager ever has to ask.</p>
+        <div class="feat-code">"Vantage (200 seats, Gurgaon) —<br/>5d quiet in Proposal." Nudge / Snooze / Lost</div>
       </div>
       <div class="feature">
         <div class="feat-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--ink)">
             <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
           </svg>
         </div>
-        <h3 class="feat-title">Pre-call context in seconds</h3>
-        <p class="feat-body">Before any call, ask for context in Telegram and instantly see: last discussion, stage, budget signal, and suggested talking points.</p>
-        <div class="feat-code">/context Priya<br/>"Razorpay · 4d · ₹8L · Ask Q2 timeline."</div>
+        <h3 class="feat-title">One screen for the whole team</h3>
+        <p class="feat-body">Team funnel by stage, total pipeline value, rep leaderboard, and every stalled deal — the view a sales head actually opens, updated as messages arrive.</p>
+        <div class="feat-code">TEAM PIPELINE ₹4.2 Cr · 23 active<br/>4 stalled · worst: 9 days quiet</div>
       </div>
       <div class="feature">
         <div class="feat-icon">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--ink)">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
           </svg>
         </div>
-        <h3 class="feat-title">Ask your pipeline anything</h3>
-        <p class="feat-body">No spreadsheets. No dashboard digging. Ask in plain language and AI answers from your actual deal data, instantly.</p>
-        <div class="feat-code">/ask who should I follow up today?<br/>/ask what's my pipeline value this month?</div>
+        <h3 class="feat-title">Ask the pipeline directly</h3>
+        <p class="feat-body">No exports, no pivot tables. Ask in plain language and the answer comes back from live deal data — in the same Telegram chat the team already works in.</p>
+        <div class="feat-code">/ask what's stuck in Negotiation?<br/>/ask pipeline value in Gurgaon this month?</div>
       </div>
     </div>
   </div>
@@ -1131,8 +1113,8 @@
   <div class="sec-inner">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:36px;gap:24px;flex-wrap:wrap">
       <div>
-        <h2 style="font-family:var(--serif);font-size:clamp(24px,3vw,36px);font-weight:300;margin-bottom:10px">The bot does the work.<br /><em style="font-style:italic;color:var(--accent)">The dashboard shows the picture.</em></h2>
-        <p style="font-size:0.875rem;color:var(--text-2);max-width:440px;line-height:1.75">Your primary interface is Telegram. The dashboard exists purely for visibility — pipeline, deal heat scores, and follow-up queue, updated automatically.</p>
+        <h2 style="font-size:clamp(24px,3vw,36px);font-weight:800;letter-spacing:-0.03em;margin-bottom:10px">Reps live in Telegram.<br /><em style="font-style:normal;color:var(--text-3)">Managers live here.</em></h2>
+        <p style="font-size:0.875rem;color:var(--text-2);max-width:440px;line-height:1.75">Reps never open a dashboard — they forward messages and answer nudges. This screen is the manager's: team funnel, pipeline value, rep leaderboard, and stalled deals, updated as the team works.</p>
       </div>
       <span class="label" style="flex-shrink:0">What it looks like</span>
     </div>
@@ -1140,15 +1122,15 @@
     <div class="db-wrap">
       <div class="db-chrome">
         <div class="db-dots">
-          <div class="db-dot" style="background:rgba(239,68,68,0.4)"></div>
-          <div class="db-dot" style="background:rgba(234,179,8,0.4)"></div>
-          <div class="db-dot" style="background:rgba(74,222,128,0.4)"></div>
+          <div class="db-dot" style="background:var(--border-2)"></div>
+          <div class="db-dot" style="background:var(--border-2)"></div>
+          <div class="db-dot" style="background:var(--border-2)"></div>
         </div>
-        <div class="db-url">app.rethinkcrm.com/dashboard</div>
+        <div class="db-url">siteline.app/team</div>
       </div>
       <div class="db-body">
         <div class="db-sidebar">
-          <div class="db-slbl">Rethink CRM</div>
+          <div class="db-slbl">Siteline</div>
           <div class="db-nav active">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             Dashboard
@@ -1159,7 +1141,7 @@
           </div>
           <div class="db-nav">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/></svg>
-            Contacts
+            Team
           </div>
           <div class="db-nav">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/></svg>
@@ -1169,63 +1151,63 @@
         <div class="db-main">
           <div class="db-stats">
             <div class="db-stat">
-              <div class="db-stat-num" style="color:var(--text)">6</div>
-              <div class="db-stat-lbl">Active</div>
+              <div class="db-stat-num" style="color:var(--ink)">₹4.2 Cr</div>
+              <div class="db-stat-lbl">Pipeline</div>
             </div>
             <div class="db-stat">
-              <div class="db-stat-num" style="color:#4ADE80">1</div>
-              <div class="db-stat-lbl">Won</div>
+              <div class="db-stat-num" style="color:var(--ink)">23</div>
+              <div class="db-stat-lbl">Active Leads</div>
             </div>
             <div class="db-stat">
-              <div class="db-stat-num" style="color:var(--accent)">3</div>
-              <div class="db-stat-lbl">Follow-ups</div>
+              <div class="db-stat-num" style="color:var(--ink)">₹2.1 Cr</div>
+              <div class="db-stat-lbl">Closed-Won</div>
             </div>
             <div class="db-stat">
-              <div class="db-stat-num" style="color:var(--text)">72</div>
-              <div class="db-stat-lbl">Avg Heat</div>
+              <div class="db-stat-num" style="color:var(--ink)">4</div>
+              <div class="db-stat-lbl">Stalled</div>
             </div>
           </div>
           <div class="db-pipe">
             <div class="db-col">
-              <div class="db-col-h">Lead · 1</div>
+              <div class="db-col-h">Inquiry · 1</div>
               <div class="db-card">
                 <span class="db-badge db-cold">Cold</span>
-                <div class="db-card-name">Sneha Patel</div>
-                <div class="db-card-co">Zepto</div>
+                <div class="db-card-name">Brightline Media</div>
+                <div class="db-card-co">40 seats · Pune</div>
               </div>
             </div>
             <div class="db-col">
-              <div class="db-col-h">Eval · 2</div>
+              <div class="db-col-h">Qualified · 2</div>
               <div class="db-card">
                 <span class="db-badge db-warm">Warm</span>
-                <div class="db-card-name">Rahul Gupta</div>
-                <div class="db-card-co">Swiggy</div>
+                <div class="db-card-name">Vantage Analytics</div>
+                <div class="db-card-co">200 seats · Gurgaon</div>
               </div>
               <div class="db-card">
                 <span class="db-badge db-hot">Hot</span>
-                <div class="db-card-name">Ananya K.</div>
-                <div class="db-card-co">Groww</div>
+                <div class="db-card-name">Kite Logistics</div>
+                <div class="db-card-co">550 seats · Mumbai</div>
               </div>
             </div>
             <div class="db-col">
               <div class="db-col-h">Proposal · 2</div>
               <div class="db-card">
                 <span class="db-badge db-warm">Warm</span>
-                <div class="db-card-name">Priya Sharma</div>
-                <div class="db-card-co">Razorpay</div>
+                <div class="db-card-name">Novabridge</div>
+                <div class="db-card-co">120 seats · Bengaluru</div>
               </div>
               <div class="db-card">
                 <span class="db-badge db-hot">Hot</span>
-                <div class="db-card-name">Nisha Joshi</div>
-                <div class="db-card-co">Dukaan</div>
+                <div class="db-card-name">Helio Systems</div>
+                <div class="db-card-co">1,200 seats · Hyderabad</div>
               </div>
             </div>
             <div class="db-col">
-              <div class="db-col-h">Negot. · 1</div>
+              <div class="db-col-h">Negotiation · 1</div>
               <div class="db-card">
                 <span class="db-badge db-hot">Hot</span>
-                <div class="db-card-name">Arjun Mehta</div>
-                <div class="db-card-co">TechCorp</div>
+                <div class="db-card-name">Meridian Tech</div>
+                <div class="db-card-co">800 seats · Noida</div>
               </div>
             </div>
           </div>
@@ -1239,37 +1221,37 @@
 <div class="sec">
   <div class="sec-inner">
     <div style="margin-bottom:52px">
-      <h2 style="font-family:var(--serif);font-size:clamp(24px,3vw,38px);font-weight:300;margin-bottom:8px">The CRM you'll <em style="font-style:italic;color:var(--accent)">actually</em> use.</h2>
-      <span class="label">From founders like you</span>
+      <h2 style="font-size:clamp(24px,3vw,38px);font-weight:800;letter-spacing:-0.03em;margin-bottom:8px">Built for every <em style="font-style:normal;color:var(--text-3)">seat</em> in the deal.</h2>
+      <span class="label">Who it's for</span>
     </div>
     <div class="testi-grid">
       <div class="testi">
-        <p class="testi-q">"I tried Pipedrive, HubSpot, even a Notion template. All failed because I never logged anything. Rethink CRM works because I don't have to."</p>
+        <p class="testi-q">Forwards the WhatsApp chat between site visits and never types a lead in again. Gets pinged only when a deal actually needs attention — with the full context attached.</p>
         <div class="testi-who">
-          <div class="testi-av">RV</div>
+          <div class="testi-av">REP</div>
           <div>
-            <div class="testi-name">Rohit Verma</div>
-            <div class="testi-role">Founder, B2B SaaS · Delhi</div>
+            <div class="testi-name">The sales rep</div>
+            <div class="testi-role">Forwards chats · answers nudges</div>
           </div>
         </div>
       </div>
       <div class="testi">
-        <p class="testi-q">"I send a voice note after every call. The bot transcribes it, extracts the deal, and my pipeline is updated before I sit down at my desk."</p>
+        <p class="testi-q">Opens one screen: funnel, pipeline value, rep leaderboard, every stalled deal. Stops running standups to find out what's true — the pipeline already says it.</p>
         <div class="testi-who">
-          <div class="testi-av">AK</div>
+          <div class="testi-av">MGR</div>
           <div>
-            <div class="testi-name">Anjali Kapoor</div>
-            <div class="testi-role">Co-founder, Fintech · Bangalore</div>
+            <div class="testi-name">The sales head</div>
+            <div class="testi-role">Watches the funnel · asks /ask</div>
           </div>
         </div>
       </div>
       <div class="testi">
-        <p class="testi-q">"The /context command before a call is a game-changer. Everything I discussed 3 weeks ago, their budget, what I promised — all of it, instantly."</p>
+        <p class="testi-q">Reads every forwarded conversation, stages and values each lead, chases the quiet ones, and answers questions about itself in plain language.</p>
         <div class="testi-who">
-          <div class="testi-av">SM</div>
+          <div class="testi-av">AI</div>
           <div>
-            <div class="testi-name">Sameer Mehta</div>
-            <div class="testi-role">Founder, D2C · Mumbai</div>
+            <div class="testi-name">The pipeline itself</div>
+            <div class="testi-role">Extracts · values · nudges · answers</div>
           </div>
         </div>
       </div>
@@ -1280,23 +1262,23 @@
 <!-- ── CTA ───────────────────────────────────────────────── -->
 <div class="cta-sec">
   <h2 class="cta-h2">
-    Start your first deal<br />
-    in <em>30 seconds.</em>
+    Your next lead is<br />
+    already <em>in WhatsApp.</em>
   </h2>
-  <p class="cta-sub">No setup. No forms to configure. No pipeline to build. Just forward your next WhatsApp conversation.</p>
-  <button class="btn-primary" onclick="openModal()" style="font-size:0.82rem;padding:13px 32px">START FREE →</button>
-  <p class="cta-note">Free · No credit card required</p>
+  <p class="cta-sub">No imports, no setup, no fields to configure. Connect the bot, forward one conversation, and watch it land — staged, valued, and assigned.</p>
+  <button class="btn-primary" onclick="openModal()" style="font-size:0.82rem;padding:14px 32px">GET THE BOT →</button>
+  <p class="cta-note">Free pilot · Works alongside the WhatsApp your team already uses</p>
 </div>
 
 <!-- ── FOOTER ────────────────────────────────────────────── -->
 <footer>
   <div class="foot-brand">
-    <strong>RETHINK CRM</strong> · Zero-input deal tracking for Indian B2B founders
+    <strong>SITELINE</strong> · Coworking lead management that runs itself
   </div>
   <div class="foot-links">
-    <a href="https://argaur.github.io/founder-crm-landing/dashboard/" target="_blank" rel="noopener noreferrer" class="foot-link">Dashboard</a>
-    <a href="https://github.com/argaur/founder-crm-landing" target="_blank" rel="noopener noreferrer" class="foot-link">GitHub</a>
-    <a href="https://t.me/RethinkCRMbot" target="_blank" rel="noopener noreferrer" class="foot-link">Open Bot</a>
+    <a href="dashboard/" class="foot-link">Dashboard</a>
+    <a href="https://t.me/RethinkCRMbot" target="_blank" rel="noopener noreferrer" class="foot-link">Open the bot</a>
+    <a href="privacy.html" class="foot-link">Privacy</a>
   </div>
 </footer>
 
@@ -1304,8 +1286,8 @@
 <div id="signup-modal" onclick="handleModalBg(event)">
   <div class="modal-box">
     <button class="modal-close" onclick="closeModal()">×</button>
-    <h3 class="modal-title">Get started with Rethink CRM</h3>
-    <p class="modal-sub">Your personal Telegram bot link — in seconds.</p>
+    <h3 class="modal-title">Get started with Siteline</h3>
+    <p class="modal-sub">Your team's Telegram bot link — in seconds.</p>
     <form id="signup-form" novalidate>
       <input type="text"  id="field-name"    class="modal-field" placeholder="First Name" required />
       <input type="email" id="field-email"   class="modal-field" placeholder="Email"      required />
@@ -1321,9 +1303,9 @@
     <div id="signup-success" class="modal-success">
       <div class="modal-success-box">
         <div class="ms-title">✓ YOU'RE ALL SET</div>
-        <div class="ms-body">Your bot is ready. The dashboard will show you how to send your first conversation — takes 30 seconds.</div>
+        <div class="ms-body">Your bot is ready. The dashboard will show you how to forward your first lead — takes 30 seconds.</div>
       </div>
-      <a id="dashboard-link" href="https://argaur.github.io/founder-crm-landing/dashboard/" class="modal-dash-btn">
+      <a id="dashboard-link" href="dashboard/" class="modal-dash-btn">
         CONTINUE TO DASHBOARD →
       </a>
     </div>
@@ -1387,7 +1369,7 @@
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
       form.style.display = 'none';
-      dashLink.href = `https://argaur.github.io/founder-crm-landing/dashboard/?uid=${data.user_id}`;
+      dashLink.href = `https://argaur.github.io/founder-crm/dashboard/?uid=${data.user_id}`;
       successDiv.style.display = 'block';
     } catch {
       errorDiv.textContent = 'Something went wrong. Please try again.';

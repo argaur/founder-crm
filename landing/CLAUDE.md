@@ -5,81 +5,88 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# No build step — pure static HTML
-# Local dev: open in browser directly or use any static server
+# No build step — pure static HTML/CSS/JS, no framework, no bundler
 python -m http.server 8080    # then open http://localhost:8080
 
 # Deploy: push to GitHub — auto-deploys to GitHub Pages
-# Live URL: https://argaur.github.io/founder-crm-landing/
+# Live URL: https://argaur.github.io/founder-crm/
 ```
 
 ## Architecture
 
-Three files. No framework, no bundler.
+Three surfaces, no framework, no bundler.
 
 ```
-index.html     — Landing page (marketing) + signup form
-dashboard/     — Dashboard SPA (single page, contacts pipeline view)
-style.css      — Shared styles (minimal — Tailwind CDN handles most)
-assets/        — Static assets
+index.html     — Landing page (marketing) + signup form. Bespoke CSS (no Tailwind — a stale claim
+                 to the contrary used to live here; the page has always been hand-styled), light/
+                 monochrome/Manrope system per DESIGN_BRIEF.md, the reference implementation of it.
+dashboard/     — Dashboard SPA: rep pipeline view + role-gated manager ("Team") view.
+                 config.js is gitignored — copy config.example.js and fill in your values.
+style.css      — Shared styles (minimal — most styling is inline per-page).
+assets/        — Static assets.
 ```
 
-Tailwind is loaded via CDN in `<script src="https://cdn.tailwindcss.com">`. Custom design tokens (brand colors, fonts) are configured inline in `tailwind.config` inside a `<script>` block in the HTML head.
+`DESIGN_BRIEF.md` (repo root) is the single source of truth for the visual system across both
+`index.html` and `dashboard/index.html` — light-only, Manrope, no accent hue, stages identified by text
+label not color. If a value here conflicts with the code, fix the code, not this file.
 
 ## Signup Flow
 
-Landing page form → `POST https://web-production-21776.up.railway.app/register` → returns `{ user_id, deep_link }` → redirects user to `dashboard/?uid=<user_id>` with the Telegram deep link displayed.
+Landing page form → `POST {API_BASE_URL}/register` → returns `{user_id, deep_link, dashboard_token}` →
+redirects to `dashboard/?uid=<user_id>` (or `?token=<dashboard_token>` directly). The Railway API URL is
+configured wherever the signup form's fetch call lives in `index.html` — check there if it changes.
 
-The Railway API endpoint is hardcoded in the form's fetch call. If the Railway URL changes, update it there.
+## Dashboard Architecture
 
-## Dashboard Routing
+`dashboard/index.html` is a single-page app using `showPage(name)` to switch between `home`, `pipeline`,
+`contacts`, `contact-detail`, `followups`, `bot`, `settings`, and `manager` (role-gated, see below).
+Pages without their own nav element (currently only `contact-detail`) must be listed in
+`PAGE_PARENT_NAV` — a missing entry crashes `showPage()`.
 
-Dashboard (`dashboard/index.html`) is a single-page app using `showPage()` to switch views. Pages that don't have their own nav element (e.g. contact-detail) must be listed in the `PAGE_PARENT_NAV` map — missing entries crash `showPage()`.
+**Auth**: the dashboard talks to the real FastAPI backend (`bot/main.py`) via signed per-user tokens, not
+directly to any database. On load, `initAuth()` resolves a token in this order: `?token=` in the URL →
+`?uid=` in the URL (mints one via `POST /dashboard-link`) → `localStorage.getItem('dashboardToken')`. The
+resolved token is persisted to `localStorage` and stripped from the URL. No token found → a full-page
+sign-in state (link to the Telegram bot), never a blank/broken dashboard. Every `/api/*` call goes
+through `apiFetch(path, opts)`, which attaches `Authorization: Bearer <token>` and clears the stored
+token + re-renders sign-in on a 401.
 
-Two visitor types handled separately:
-- Direct visitors → land on home page
-- Signup redirect (`?uid=`) → land on bot page with their Telegram deep link
+**Rep vs. manager views**: `GET /api/me` at bootstrap returns the authenticated user's role. Reps see the
+`pipeline`/`contacts`/`followups` pages scoped to their own leads. The `Team` nav item (routes to
+`page-manager`) ships hidden and is revealed only for `role === 'manager'` — it renders live data from
+`GET /api/team/funnel` (manager-only, 403 for reps): team funnel by stage, a rep leaderboard, and a
+stalled-leads list. These are two separate pages with two separate auth scopes by design, not a toggle —
+see `DASHBOARD_MANAGER_VIEW_SPEC.md` for the full layout/copy rationale.
 
-Dashboard always loads demo data under `user_id="demo-gaurav-001"` — it's a portfolio demo, not a live multi-user dashboard.
+Money renders via a shared `formatINR(n)` helper (`>=1e7 → ₹X.X Cr`, `>=1e5 → ₹XX L`, else
+`toLocaleString('en-IN')` rupees) — never render a raw integer.
+
+Two visitor types on load: direct visitors land on the home page; signup-redirect visitors (`?uid=`)
+land on the `bot` page with their Telegram deep link, same as before the auth rework — that navigation
+behavior is preserved, only the token handling around it changed.
 
 ## API Dependency
 
-Dashboard fetches live data from the Railway backend (`web-production-21776.up.railway.app`). If Railway is sleeping or down, the dashboard shows empty/error state. No local mock — test against the live Railway deployment.
+The dashboard fetches all data from `bot/main.py`'s FastAPI backend (`API_BASE_URL` in `config.js` —
+Railway URL in production, `http://localhost:8000` for local dev). CORS on the backend only allows
+`https://argaur.github.io` and `localhost`/`127.0.0.1` (with or without `:8080`) — serve this directory
+on one of those origins when testing locally, or every fetch will fail with a CORS error, not a useful
+one. If the backend is sleeping or down, `apiFetch` throws and the calling page shows `.err-banner`
+rather than a blank/broken view.
 
----
-
-## AI Session Protocol — Read This First
-
-> Instructions for Claude. Follow these steps at the start of every session.
-
-### Step 1: Orient (before touching any code)
-- Read this file fully
-- Run `git log --oneline -10` to see recent history
-- Check "Status" section below → tell Gaurav: current state, what was last done, what's next
-
-### Step 2: Explore → Gemini (not Claude tokens)
-- Large file reads, understanding a module → Gemini terminal tab
-- Gemini has 1M context and is free — don't burn Claude tokens on reads
-
-### Step 3: Plan → Claude Plan Mode
-- Any task with 3+ steps → enter Plan Mode before writing code
-
-### Step 4: Build → Split by task type
-
-| Task | Tool |
-|---|---|
-| Repetitive HTML/CSS, copy changes | Codex background mode |
-| JS logic, routing, API integration | Claude |
-| Inline completions, simple edits | Copilot |
-
-### Step 5: End of Session (do not skip)
-1. Update "Status" section below
-2. Run `/compact` in Claude
-
----
+There is no local mock — test against a real running `bot/main.py` (see `bot/CLAUDE.md`), ideally seeded
+via `python seed.py --seed` so the pipeline/manager views have real data to render.
 
 ## Status
-- **State:** completed
-- **Current task:** none — static portfolio landing, deployed to GitHub Pages
-- **Blocker:** none
-- **Last updated:** 2026-04-14
+- **State:** Fully rewired off Airtable (the dashboard used to call `api.airtable.com` directly from the
+  browser with a client-side PAT — a real credential-exposure bug, now closed) onto the authenticated
+  `/api/*` backend. Restyled to `DESIGN_BRIEF.md`'s light/monochrome system. Manager view built and
+  live-verified. Both live-verified via real `curl`/API round-trips against Neon this session; no browser
+  automation was available to confirm the rendered pixels, so a manual click-through is still worth doing
+  before the final demo.
+- **Current task:** none pending on this surface — next relevant step is the Phase 9 end-to-end
+  walkthrough once `bot/.env`'s remaining API keys are filled in.
+- **Blocker:** none directly (this surface doesn't need the missing API keys) — but a real demo walk-
+  through needs the bot running with `TELEGRAM_BOT_TOKEN` set, since the `bot` page's deep link and the
+  signup→Telegram handoff only make sense with a real bot.
+- **Last updated:** 2026-07-17

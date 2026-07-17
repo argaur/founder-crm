@@ -1,5 +1,3 @@
-import os
-import re
 import logging
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -12,22 +10,18 @@ from telegram.ext import (
     filters,
 )
 from telegram.helpers import escape_markdown
-from dotenv import load_dotenv
 
 import db
 import ai
 
-load_dotenv()
 logger = logging.getLogger(__name__)
-
-APP_BASE_URL = os.getenv("APP_BASE_URL", "")
 
 # ─── ConversationHandler states for /addcontact ───────────────
 ADD_NAME, ADD_COMPANY, ADD_STAGE, ADD_SOURCE = range(4)
 
-ACTIVE_STAGES = ["Lead", "Evaluating", "Proposal Sent", "Negotiating"]
+OPEN_STAGES = [s for s in db.STAGES if s not in db.CLOSED_STAGES]
 
-# Human-readable labels shown to user → Airtable field values stored in DB
+# Human-readable labels shown to user → source values stored in DB
 SOURCE_LABELS = ["WhatsApp", "Phone / Meeting", "LinkedIn", "Referral", "Other"]
 SOURCE_VALUES = ["whatsapp_forward", "manual", "manual", "manual", "other"]
 
@@ -39,53 +33,58 @@ def md(text) -> str:
     return escape_markdown(str(text) if text is not None else "", version=2)
 
 
-def _get_user(telegram_id: int):
-    """
-    Look up a registered user by Telegram ID.
-    Returns the Airtable record dict or None.
-    Note: db functions are synchronous — no await needed.
-    """
+def fmt_inr(value) -> str:
+    v = float(value)
+    if v >= 1e7:
+        return f"₹{v / 1e7:.1f}Cr"
+    if v >= 1e5:
+        return f"₹{v / 1e5:.1f}L"
+    return f"₹{v:,.0f}"
+
+
+async def _get_user(telegram_id: int):
     try:
-        return db.get_user_by_telegram_id(telegram_id)
+        return await db.get_user_by_telegram_id(telegram_id)
     except Exception as e:
         logger.error(f"Error fetching user {telegram_id}: {e}")
         return None
 
 
-def _flatten_contact(rec: dict) -> dict:
-    """
-    Adapt an Airtable contact record for use with ai.py functions and display.
+def _pipeline_scope(user: dict):
+    """Managers see the team-wide pipeline; reps see only their own leads."""
+    return None if user.get("role") == "manager" else user["id"]
 
-    db.py returns Airtable records in the form:
-        rec["id"]                       → Airtable record ID (e.g. "recXXXXX")
-        rec["fields"]["name"]           → contact name
-        rec["heat_score"]               → {"score": int, "label": str}  (injected by get_all_contacts)
 
-    ai.py expects a flat dict with keys like contact_name, company, heat_score, etc.
-    This adapter bridges the two.
-    """
-    fields = rec.get("fields", {})
-    heat = rec.get("heat_score", {})
-    score = heat.get("score", 0) if isinstance(heat, dict) else 0
-    label = heat.get("label", "Cold") if isinstance(heat, dict) else "Cold"
-    return {
-        "contact_name": fields.get("name", "Unknown"),
-        "company": fields.get("company", ""),
-        "role": fields.get("role", ""),
-        "stage": fields.get("stage", "Lead"),
-        "budget_signal": fields.get("budget_signal"),
-        "next_action": fields.get("next_action"),
-        "heat_score": score,
-        "heat_label": label,
-        "interaction_count": fields.get("interaction_count", 0),
-        "_record_id": rec.get("id"),
-    }
+async def _company_name(lead: dict) -> str:
+    if not lead.get("company_id"):
+        return ""
+    company = await db.get_company_by_id(lead["company_id"])
+    return company["name"] if company else ""
+
+
+async def _company_names(leads: list) -> dict:
+    names = {}
+    for company_id in {l["company_id"] for l in leads if l.get("company_id")}:
+        company = await db.get_company_by_id(company_id)
+        if company:
+            names[company_id] = company["name"]
+    return names
+
+
+def _lead_details(lead: dict) -> str:
+    parts = []
+    if lead.get("seat_count"):
+        parts.append(f"{lead['seat_count']} seats")
+    if lead.get("city"):
+        parts.append(lead["city"])
+    if lead.get("est_deal_value"):
+        parts.append(fmt_inr(lead["est_deal_value"]))
+    return " · ".join(parts)
 
 
 async def _not_registered(update: Update):
-    base = md(APP_BASE_URL) if APP_BASE_URL else "the signup page"
     await update.message.reply_text(
-        f"You're not registered yet\\. Visit {base} to create your account\\.",
+        "You're not registered yet\\. Send /start to set up your account\\.",
         parse_mode="MarkdownV2",
     )
 
@@ -94,80 +93,65 @@ async def _not_registered(update: Update):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Three cases:
-    1. /start <user_id>  — deep link from landing page signup
-    2. /start            — returning registered user
-    3. /start            — unregistered user
+    Two cases:
+    1. /start from a new user — auto-register (users are keyed on telegram_id)
+    2. /start from a returning registered user — welcome back + pipeline count
     """
     telegram_id = update.effective_user.id
+    user = await _get_user(telegram_id)
 
-    # Case 1: deep link
-    if context.args:
-        user_id = context.args[0]
+    if user is None:
+        first_name = update.effective_user.first_name or "there"
         try:
-            result = db.link_telegram_to_user(user_id, telegram_id)
-            if result:
-                await update.message.reply_text(
-                    "You're set up\\! Forward any WhatsApp chat or send a voice note to get started\\.\n\n"
-                    "Use /help to see all commands\\.",
-                    parse_mode="MarkdownV2",
-                )
-            else:
-                await update.message.reply_text(
-                    f"Couldn't find an account for that link\\. "
-                    f"Visit {md(APP_BASE_URL)} to register\\.",
-                    parse_mode="MarkdownV2",
-                )
+            user = await db.create_user(telegram_id, first_name)
         except Exception as e:
-            logger.error(f"Error linking user {user_id}: {e}")
+            logger.error(f"Error registering user {telegram_id}: {e}")
             await update.message.reply_text(
-                "Something went wrong during setup\\. Please try the link again\\.",
+                "Something went wrong during setup\\. Please try /start again\\.",
                 parse_mode="MarkdownV2",
             )
+            return
+
+        await update.message.reply_text(
+            f"You're set up, *{md(user['first_name'])}*\\! "
+            "Forward any WhatsApp chat or send a voice note to log your first lead\\.\n\n"
+            "Use /help to see all commands\\.",
+            parse_mode="MarkdownV2",
+        )
         return
 
-    # Cases 2 & 3
-    user = _get_user(telegram_id)
-    if user:
-        first_name = user["fields"].get("first_name", "there")
-        try:
-            pipeline = db.get_all_contacts(user["fields"]["user_id"])
-            # get_all_contacts returns a dict keyed by stage; Won/Lost are closed stages
-            active_count = sum(
-                len(v) for k, v in pipeline.items() if k not in ["Won", "Lost"]
-            )
-        except Exception:
-            active_count = 0
+    try:
+        pipeline = await db.get_all_leads(_pipeline_scope(user))
+        active_count = sum(
+            len(v) for k, v in pipeline.items() if k not in db.CLOSED_STAGES
+        )
+    except Exception as e:
+        logger.error(f"Pipeline count error for {telegram_id}: {e}")
+        active_count = 0
 
-        await update.message.reply_text(
-            f"Welcome back, *{md(first_name)}*\\! "
-            f"You have *{active_count}* active deal\\(s\\)\\.\n\n"
-            "Use /pipeline to see your full view\\.",
-            parse_mode="MarkdownV2",
-        )
-    else:
-        base = md(APP_BASE_URL) if APP_BASE_URL else "the signup page"
-        await update.message.reply_text(
-            f"Welcome to *Founder CRM*\\!\n\n"
-            f"Visit {base} to create your account and get your personal bot link\\.",
-            parse_mode="MarkdownV2",
-        )
+    await update.message.reply_text(
+        f"Welcome back, *{md(user['first_name'])}*\\! "
+        f"You have *{active_count}* active deal\\(s\\)\\.\n\n"
+        "Use /pipeline to see your full view\\.",
+        parse_mode="MarkdownV2",
+    )
 
 
 # ─── /help ────────────────────────────────────────────────────
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "*Founder CRM — Commands*\n\n"
-        "/pipeline — View full pipeline grouped by stage\n"
+        "*Coworking Sales CRM — Commands*\n\n"
+        "/pipeline — View pipeline grouped by stage \\(managers see the whole team\\)\n"
         "/deals — Same as /pipeline\n"
-        "/context \\[name\\] — Pre\\-call brief for a contact\n"
+        "/context \\[name\\] — Pre\\-call brief for a lead\n"
         "/ask \\[question\\] — Natural language pipeline query\n"
         "/addnote — Add a note to a deal \\(guided\\)\n"
         "/note \\[text\\] — Quick note to your most recent deal\n"
-        "/won \\[name\\] — Mark a deal as Won\n"
-        "/lost \\[name\\] — Mark a deal as Lost\n"
-        "/addcontact — Add a contact manually \\(guided\\)\n"
+        "/won \\[name\\] — Mark a deal Closed\\-Won\n"
+        "/lost \\[name\\] — Mark a deal Closed\\-Lost\n"
+        "/addcontact — Add a lead manually \\(guided\\)\n"
+        "/reassign \\[lead id\\] \\[rep name\\] — Reassign a lead \\(managers only\\)\n"
         "/cancel — Exit any active flow\n\n"
         "Or just *forward a WhatsApp chat* or send a *voice note* — AI captures the deal automatically\\."
     )
@@ -178,20 +162,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Text Kanban. db.get_all_contacts() returns a dict keyed by stage name,
-    with each value being a list of Airtable records. heat_score is injected
-    by get_all_contacts as rec["heat_score"] = {"score": int, "label": str}.
-    Shows top 3 per stage sorted by heat score.
+    Text Kanban grouped by stage. Shows top 3 per stage sorted by heat score,
+    with seat count / city / est. deal value per lead and total open pipeline value.
     """
     telegram_id = update.effective_user.id
-    user = _get_user(telegram_id)
+    user = await _get_user(telegram_id)
     if not user:
         await _not_registered(update)
         return
 
-    user_id = user["fields"]["user_id"]
     try:
-        pipeline_data = db.get_all_contacts(user_id)
+        pipeline_data = await db.get_all_leads(_pipeline_scope(user))
     except Exception as e:
         logger.error(f"Pipeline fetch error: {e}")
         await update.message.reply_text(
@@ -199,48 +180,50 @@ async def pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    active_stages = ["Lead", "Evaluating", "Proposal Sent", "Negotiating"]
-    total_active = sum(len(pipeline_data.get(s, [])) for s in active_stages)
-    won_count = len(pipeline_data.get("Won", []))
-    lost_count = len(pipeline_data.get("Lost", []))
+    total_active = sum(len(pipeline_data.get(s, [])) for s in OPEN_STAGES)
+    won_count = len(pipeline_data.get("Closed-Won", []))
+    lost_count = len(pipeline_data.get("Closed-Lost", []))
 
     if total_active == 0 and won_count == 0 and lost_count == 0:
         await update.message.reply_text(
-            "No deals yet\\. Forward a WhatsApp conversation to get started\\.",
+            "No leads yet\\. Forward a WhatsApp conversation to get started\\.",
             parse_mode="MarkdownV2",
         )
         return
 
-    lines = ["*YOUR PIPELINE*", "─────────────────────"]
+    open_leads = [l for s in OPEN_STAGES for l in pipeline_data.get(s, [])]
+    company_names = await _company_names(open_leads)
+    pipeline_value = sum(float(l["est_deal_value"] or 0) for l in open_leads)
 
-    for stage in active_stages:
-        contacts = pipeline_data.get(stage, [])
-        # Sort by heat score descending, show top 3
-        contacts_sorted = sorted(
-            contacts,
-            key=lambda r: (
-                r["heat_score"]["score"]
-                if isinstance(r.get("heat_score"), dict)
-                else 0
-            ),
-            reverse=True,
+    title = "*TEAM PIPELINE*" if user.get("role") == "manager" else "*YOUR PIPELINE*"
+    lines = [title, "─────────────────────"]
+
+    for stage in OPEN_STAGES:
+        leads = pipeline_data.get(stage, [])
+        leads_sorted = sorted(
+            leads, key=lambda l: l["heat_score"]["score"], reverse=True
         )
-        top3 = contacts_sorted[:3]
-        count = len(contacts)
+        top3 = leads_sorted[:3]
 
-        lines.append(f"*{md(stage.upper())} \\({count}\\)*")
+        lines.append(f"*{md(stage.upper())} \\({len(leads)}\\)*")
         if not top3:
             lines.append("  _none_")
         else:
-            for rec in top3:
-                flat = _flatten_contact(rec)
+            for lead in top3:
+                company = company_names.get(lead["company_id"], "?")
+                heat = lead["heat_score"]
                 lines.append(
-                    f"  • {md(flat['contact_name'])} @ {md(flat['company'])} "
-                    f"\\[{md(flat['heat_label'])} {flat['heat_score']}\\]"
+                    f"  • {md(lead['contact_name'])} @ {md(company)} "
+                    f"\\[{md(heat['label'])} {heat['score']}\\]"
                 )
+                details = _lead_details(lead)
+                if details:
+                    lines.append(f"    {md(details)}")
 
     lines.append("─────────────────────")
-    lines.append(f"WON: {won_count} \\| LOST: {lost_count}")
+    if pipeline_value > 0:
+        lines.append(f"Open pipeline value: {md(fmt_inr(pipeline_value))}")
+    lines.append(f"CLOSED\\-WON: {won_count} \\| CLOSED\\-LOST: {lost_count}")
 
     await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
 
@@ -249,45 +232,44 @@ async def pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def context_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Pre-call brief. If multiple contacts match, shows an inline keyboard for disambiguation.
-    Callback data format: "ctx:{airtable_record_id}"
+    Pre-call brief. If multiple leads match, shows an inline keyboard for
+    disambiguation. Callback data format: "ctx:{lead_id}"
     """
     telegram_id = update.effective_user.id
-    user = _get_user(telegram_id)
+    user = await _get_user(telegram_id)
     if not user:
         await _not_registered(update)
         return
 
-    user_id = user["fields"]["user_id"]
     name_query = " ".join(context.args).strip() if context.args else ""
 
     if not name_query:
         await update.message.reply_text(
-            "Which contact? Usage: /context \\[name\\]", parse_mode="MarkdownV2"
+            "Which lead? Usage: /context \\[name\\]", parse_mode="MarkdownV2"
         )
         return
 
     try:
-        matches = db.find_contact(name_query, user_id)
+        matches = await db.find_leads(name_query)
     except Exception as e:
-        logger.error(f"Contact search error: {e}")
+        logger.error(f"Lead search error: {e}")
         await update.message.reply_text("Search failed\\. Try again\\.", parse_mode="MarkdownV2")
         return
 
     if not matches:
         await update.message.reply_text(
-            f"No contact found matching _{md(name_query)}_\\.", parse_mode="MarkdownV2"
+            f"No lead found matching _{md(name_query)}_\\.", parse_mode="MarkdownV2"
         )
         return
 
     if len(matches) > 1:
-        # Inline keyboard for disambiguation — store record ID in callback_data
+        company_names = await _company_names(matches[:5])
         buttons = [
             [InlineKeyboardButton(
-                f"{rec['fields'].get('name', '?')} @ {rec['fields'].get('company', '?')}",
-                callback_data=f"ctx:{rec['id']}",
+                f"{lead['contact_name']} @ {company_names.get(lead['company_id'], '?')}",
+                callback_data=f"ctx:{lead['id']}",
             )]
-            for rec in matches[:5]
+            for lead in matches[:5]
         ]
         await update.message.reply_text(
             "Multiple matches found\\. Which one?",
@@ -303,37 +285,58 @@ async def context_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles disambiguation button press for /context."""
     query = update.callback_query
     await query.answer()
-    record_id = query.data.split(":", 1)[1]
+    lead_id = int(query.data.split(":", 1)[1])
 
     try:
-        rec = db.get_contact_by_id(record_id)
+        lead = await db.get_lead_by_id(lead_id)
     except Exception as e:
-        logger.error(f"Contact fetch error: {e}")
-        await query.edit_message_text("Couldn't load contact\\.", parse_mode="MarkdownV2")
+        logger.error(f"Lead fetch error: {e}")
+        lead = None
+
+    if not lead:
+        await query.edit_message_text("Couldn't load lead\\.", parse_mode="MarkdownV2")
         return
 
-    await _send_context_brief(update, rec, via_callback=True)
+    await _send_context_brief(update, lead, via_callback=True)
 
 
-async def _send_context_brief(update: Update, rec: dict, via_callback: bool):
+async def _send_context_brief(update: Update, lead: dict, via_callback: bool):
     """Fetches recent interactions and generates an AI pre-call brief."""
-    record_id = rec["id"]
-    flat = _flatten_contact(rec)
+    company_name = await _company_name(lead)
+    heat = lead["heat_score"]
 
     try:
-        interactions_raw = db.get_interactions(record_id)
-        summaries = [
-            r["fields"].get("ai_summary", "")
-            for r in interactions_raw
-            if r["fields"].get("ai_summary")
-        ]
-        brief = ai.generate_context_brief(flat, summaries)
+        interactions = await db.get_interactions(lead["id"])
+        summaries = [r["ai_summary"] for r in interactions if r.get("ai_summary")]
+
+        budget_signal = None
+        if lead.get("budget_per_seat"):
+            budget_signal = f"₹{float(lead['budget_per_seat']):,.0f}/seat/month"
+
+        brief = await ai.generate_context_brief(
+            {
+                "contact_name": lead["contact_name"],
+                "company": company_name,
+                "stage": lead["stage"],
+                "heat_score": f"{heat['score']} ({heat['label']})",
+                "budget_signal": budget_signal,
+            },
+            summaries,
+        )
     except Exception as e:
         logger.error(f"Brief generation error: {e}", exc_info=True)
         brief = f"Error: {e}"
 
+    facts = [f"Stage: {lead['stage']}"]
+    details = _lead_details(lead)
+    if details:
+        facts.append(details)
+
     # AI output is escaped to prevent MarkdownV2 parse errors from unpredictable content
-    msg = f"*Pre\\-call Brief: {md(flat['contact_name'])}*\n\n{md(brief)}"
+    msg = (
+        f"*Pre\\-call Brief: {md(lead['contact_name'])}*\n"
+        f"{md(' | '.join(facts))}\n\n{md(brief)}"
+    )
 
     if via_callback:
         await update.callback_query.edit_message_text(msg, parse_mode="MarkdownV2")
@@ -353,18 +356,15 @@ async def lost_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _mark_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
     """
-    Shared logic for /won and /lost.
-    Uses inline Yes/Cancel keyboard. Callback data uses ":" separator to safely
-    handle Airtable record IDs (which can contain underscores).
-    Format: "mark_won:{record_id}" or "mark_cancel:{record_id}"
+    Shared logic for /won and /lost, with an inline Yes/Cancel keyboard.
+    Callback data format: "mark_won:{lead_id}" or "mark_cancel:{lead_id}"
     """
     telegram_id = update.effective_user.id
-    user = _get_user(telegram_id)
+    user = await _get_user(telegram_id)
     if not user:
         await _not_registered(update)
         return
 
-    user_id = user["fields"]["user_id"]
     name_query = " ".join(context.args).strip() if context.args else ""
 
     if not name_query:
@@ -374,46 +374,43 @@ async def _mark_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, acti
         return
 
     try:
-        matches = db.find_contact(name_query, user_id)
+        matches = await db.find_leads(name_query)
     except Exception as e:
-        logger.error(f"Contact search error: {e}")
+        logger.error(f"Lead search error: {e}")
         await update.message.reply_text("Search failed\\. Try again\\.", parse_mode="MarkdownV2")
         return
 
     if not matches:
         await update.message.reply_text(
-            f"No contact found matching _{md(name_query)}_\\.", parse_mode="MarkdownV2"
+            f"No lead found matching _{md(name_query)}_\\.", parse_mode="MarkdownV2"
         )
         return
 
-    rec = matches[0]
-    flat = _flatten_contact(rec)
-    record_id = flat["_record_id"]
-    label = "WON" if action == "won" else "LOST"
+    lead = matches[0]
+    company_name = await _company_name(lead)
+    label = "CLOSED-WON" if action == "won" else "CLOSED-LOST"
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton(
-            f"Yes, mark as {label}", callback_data=f"mark_{action}:{record_id}"
+            f"Yes, mark as {label}", callback_data=f"mark_{action}:{lead['id']}"
         ),
-        InlineKeyboardButton("Cancel", callback_data=f"mark_cancel:{record_id}"),
+        InlineKeyboardButton("Cancel", callback_data=f"mark_cancel:{lead['id']}"),
     ]])
 
     await update.message.reply_text(
-        f"Mark *{md(flat['contact_name'])}* from *{md(flat['company'])}* as *{label}*?",
+        f"Mark *{md(lead['contact_name'])}* from *{md(company_name or '?')}* as *{md(label)}*?",
         reply_markup=keyboard,
         parse_mode="MarkdownV2",
     )
 
 
 async def mark_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles Yes/Cancel callbacks for /won and /lost.
-    Splits on first ":" only so Airtable record IDs are preserved intact.
-    """
+    """Handles Yes/Cancel callbacks for /won and /lost."""
     query = update.callback_query
     await query.answer()
 
-    action_key, record_id = query.data.split(":", 1)
+    action_key, lead_id_str = query.data.split(":", 1)
+    lead_id = int(lead_id_str)
 
     if action_key == "mark_cancel":
         await query.edit_message_text("Cancelled\\.", parse_mode="MarkdownV2")
@@ -421,17 +418,15 @@ async def mark_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if action_key == "mark_won":
-            db.mark_won(record_id)
-        elif action_key == "mark_lost":
-            db.mark_lost(record_id)
+            lead = await db.mark_won(lead_id)
+        else:
+            lead = await db.mark_lost(lead_id)
 
-        rec = db.get_contact_by_id(record_id)
-        name = md(rec["fields"].get("name", "Contact"))
-        label = "WON" if action_key == "mark_won" else "LOST"
-        note_tip = "Add a win note: /addnote" if label == "WON" else "Log what happened: /addnote"
+        label = "CLOSED-WON" if action_key == "mark_won" else "CLOSED-LOST"
+        note_tip = "Add a win note: /addnote" if action_key == "mark_won" else "Log what happened: /addnote"
 
         await query.edit_message_text(
-            f"*{name}* marked as *{label}*\\.\n\n{md(note_tip)}",
+            f"*{md(lead['contact_name'])}* marked as *{md(label)}*\\.\n\n{md(note_tip)}",
             parse_mode="MarkdownV2",
         )
     except Exception as e:
@@ -444,15 +439,14 @@ async def mark_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ask_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Natural language Q&A over the pipeline.
-    Serializes all contacts as plain text, passes to ai.answer_pipeline_query().
+    Serializes all leads as plain text, passes to ai.answer_pipeline_query().
     """
     telegram_id = update.effective_user.id
-    user = _get_user(telegram_id)
+    user = await _get_user(telegram_id)
     if not user:
         await _not_registered(update)
         return
 
-    user_id = user["fields"]["user_id"]
     question = " ".join(context.args).strip() if context.args else ""
 
     if not question:
@@ -464,28 +458,38 @@ async def ask_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        pipeline_data = db.get_all_contacts(user_id)
+        pipeline_data = await db.get_all_leads(_pipeline_scope(user))
+        all_leads = [l for leads in pipeline_data.values() for l in leads]
+        company_names = await _company_names(all_leads)
+        users_by_id = {u["id"]: u["first_name"] for u in await db.get_all_users()}
     except Exception as e:
         logger.error(f"Pipeline fetch error: {e}")
         await update.message.reply_text("Couldn't fetch pipeline data\\.", parse_mode="MarkdownV2")
         return
 
-    # Serialize all contacts as plain text for the AI context window
     lines = []
-    for stage, contacts in pipeline_data.items():
-        for rec in contacts:
-            flat = _flatten_contact(rec)
-            lines.append(
-                f"- {flat['contact_name']} @ {flat['company']} | "
-                f"Stage: {flat['stage']} | "
-                f"Heat: {flat['heat_score']} ({flat['heat_label']}) | "
-                f"Next: {flat['next_action'] or 'not set'}"
-            )
+    for lead in all_leads:
+        heat = lead["heat_score"]
+        parts = [
+            f"{lead['contact_name']} @ {company_names.get(lead['company_id'], 'unknown company')}",
+            f"Stage: {lead['stage']}",
+            f"Heat: {heat['score']} ({heat['label']})",
+        ]
+        if lead.get("seat_count"):
+            parts.append(f"Seats: {lead['seat_count']}")
+        if lead.get("city"):
+            parts.append(f"City: {lead['city']}")
+        if lead.get("est_deal_value"):
+            parts.append(f"Est value: {fmt_inr(lead['est_deal_value'])}")
+        rep = users_by_id.get(lead.get("assigned_to"))
+        if rep:
+            parts.append(f"Rep: {rep}")
+        lines.append("- " + " | ".join(parts))
 
-    pipeline_context = "\n".join(lines) if lines else "No contacts in pipeline."
+    pipeline_context = "\n".join(lines) if lines else "No leads in pipeline."
 
     try:
-        answer = ai.answer_pipeline_query(question, pipeline_context)
+        answer = await ai.answer_pipeline_query(question, pipeline_context)
     except Exception as e:
         logger.error(f"AI query error: {e}")
         await update.message.reply_text("AI query failed\\. Try again\\.", parse_mode="MarkdownV2")
@@ -494,17 +498,78 @@ async def ask_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(md(answer), parse_mode="MarkdownV2")
 
 
+# ─── /reassign [lead id] [rep name] — manager only ────────────
+
+async def reassign(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    user = await _get_user(telegram_id)
+    if not user:
+        await _not_registered(update)
+        return
+
+    if user.get("role") != "manager":
+        await update.message.reply_text(
+            "Only managers can reassign leads\\.", parse_mode="MarkdownV2"
+        )
+        return
+
+    args = context.args or []
+    usage = "Usage: /reassign \\[lead id\\] \\[rep name\\]"
+    if len(args) < 2:
+        await update.message.reply_text(usage, parse_mode="MarkdownV2")
+        return
+
+    try:
+        lead_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text(usage, parse_mode="MarkdownV2")
+        return
+
+    rep_query = " ".join(args[1:]).strip()
+
+    try:
+        lead = await db.get_lead_by_id(lead_id)
+        if not lead:
+            await update.message.reply_text(
+                f"No lead with ID {lead_id}\\.", parse_mode="MarkdownV2"
+            )
+            return
+
+        users = await db.get_all_users()
+        rep = next(
+            (u for u in users if u["first_name"].lower() == rep_query.lower()), None
+        )
+        if not rep:
+            names = ", ".join(u["first_name"] for u in users) or "none"
+            await update.message.reply_text(
+                f"No rep named _{md(rep_query)}_\\. Team: {md(names)}\\.",
+                parse_mode="MarkdownV2",
+            )
+            return
+
+        await db.assign_lead(lead_id, rep["id"])
+    except Exception as e:
+        logger.error(f"Reassign error: {e}")
+        await update.message.reply_text("Reassign failed\\. Try again\\.", parse_mode="MarkdownV2")
+        return
+
+    await update.message.reply_text(
+        f"*{md(lead['contact_name'])}* reassigned to *{md(rep['first_name'])}*\\.",
+        parse_mode="MarkdownV2",
+    )
+
+
 # ─── /addcontact — ConversationHandler ───────────────────────
 
 async def addcontact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = _get_user(update.effective_user.id)
+    user = await _get_user(update.effective_user.id)
     if not user:
         await _not_registered(update)
         return ConversationHandler.END
 
     context.user_data["addcontact"] = {}
     await update.message.reply_text(
-        "Let's add a new contact\\. What's their *name*?", parse_mode="MarkdownV2"
+        "Let's add a new lead\\. What's the contact's *name*?", parse_mode="MarkdownV2"
     )
     return ADD_NAME
 
@@ -526,7 +591,7 @@ async def addcontact_company(update: Update, context: ContextTypes.DEFAULT_TYPE)
     company = update.message.text.strip()
     context.user_data["addcontact"]["company"] = company
 
-    stage_list = "\n".join(f"{i + 1}\\. {md(s)}" for i, s in enumerate(ACTIVE_STAGES))
+    stage_list = "\n".join(f"{i + 1}\\. {md(s)}" for i, s in enumerate(OPEN_STAGES))
     await update.message.reply_text(
         f"*Company:* {md(company)}\n\nWhat *pipeline stage* are they at? "
         f"Reply with a number:\n{stage_list}",
@@ -541,15 +606,15 @@ async def addcontact_stage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stage = None
     try:
         idx = int(text) - 1
-        if 0 <= idx < len(ACTIVE_STAGES):
-            stage = ACTIVE_STAGES[idx]
+        if 0 <= idx < len(OPEN_STAGES):
+            stage = OPEN_STAGES[idx]
     except ValueError:
-        stage = next((s for s in ACTIVE_STAGES if s.lower() == text.lower()), None)
+        stage = next((s for s in OPEN_STAGES if s.lower() == text.lower()), None)
 
     if not stage:
-        stage_list = "\n".join(f"{i + 1}\\. {md(s)}" for i, s in enumerate(ACTIVE_STAGES))
+        stage_list = "\n".join(f"{i + 1}\\. {md(s)}" for i, s in enumerate(OPEN_STAGES))
         await update.message.reply_text(
-            f"Please pick a number 1\\-{len(ACTIVE_STAGES)}:\n{stage_list}",
+            f"Please pick a number 1\\-{len(OPEN_STAGES)}:\n{stage_list}",
             parse_mode="MarkdownV2",
         )
         return ADD_STAGE
@@ -571,9 +636,8 @@ async def addcontact_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         idx = int(text) - 1
         if 0 <= idx < len(SOURCE_LABELS):
-            source = SOURCE_VALUES[idx]  # store the Airtable value, not the display label
+            source = SOURCE_VALUES[idx]  # store the DB value, not the display label
     except ValueError:
-        # Allow typing the label directly
         match_idx = next(
             (i for i, s in enumerate(SOURCE_LABELS) if s.lower() == text.lower()), None
         )
@@ -590,27 +654,29 @@ async def addcontact_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data.get("addcontact", {})
     data["source"] = source
 
-    user = _get_user(update.effective_user.id)
-    user_id = user["fields"]["user_id"]
+    user = await _get_user(update.effective_user.id)
+    if not user:
+        await _not_registered(update)
+        context.user_data.pop("addcontact", None)
+        return ConversationHandler.END
 
     try:
-        # db.create_contact always initialises stage as "Lead"
-        db.create_contact(
-            name=data["name"],
-            company=data["company"],
-            role="",
+        company_id = None
+        if data["company"]:
+            company = await db.find_or_create_company(data["company"])
+            company_id = company["id"]
+
+        await db.create_lead(
+            contact_name=data["name"],
+            company_id=company_id,
+            stage=data["stage"],
+            assigned_to=user["id"],
             source=source,
-            user_id=user_id,
         )
-        # If user picked a stage other than Lead, find the new record and update it
-        if data["stage"] != "Lead":
-            matches = db.find_contact(data["name"], user_id)
-            if matches:
-                db.update_contact_stage(matches[0]["id"], data["stage"])
     except Exception as e:
-        logger.error(f"Create contact error: {e}")
+        logger.error(f"Create lead error: {e}")
         await update.message.reply_text(
-            "Failed to save contact\\. Try again\\.", parse_mode="MarkdownV2"
+            "Failed to save lead\\. Try again\\.", parse_mode="MarkdownV2"
         )
         context.user_data.pop("addcontact", None)
         return ConversationHandler.END
@@ -669,6 +735,7 @@ def get_handlers() -> list:
         CommandHandler("won", won_handler),
         CommandHandler("lost", lost_handler),
         CommandHandler("ask", ask_pipeline),
+        CommandHandler("reassign", reassign),
         CommandHandler("cancel", cancel),
         CallbackQueryHandler(context_callback, pattern="^ctx:"),
         CallbackQueryHandler(mark_callback, pattern="^mark_"),

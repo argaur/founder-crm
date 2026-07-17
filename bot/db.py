@@ -1,49 +1,94 @@
 import os
-import logging
+import math
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
-from dotenv import load_dotenv
-from pyairtable import Api
-from pyairtable.formulas import match
+from typing import Any, Dict, List, Optional
 
-# Load environment variables
+import asyncpg
+from dotenv import load_dotenv
+
 load_dotenv()
 
-# Configuration
-AIRTABLE_PAT = os.getenv("AIRTABLE_PAT")
-AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+# Canonical pipeline stage list — single source of truth for the whole app.
+# ai.py's extraction may return "unknown" as a fallback; that value is
+# extraction-only and must never be persisted, which stage validation enforces.
+STAGES = [
+    "Inquiry",
+    "Qualified",
+    "Site Visit",
+    "Proposal",
+    "Negotiation",
+    "Closed-Won",
+    "Closed-Lost",
+]
 
-if not AIRTABLE_PAT or not AIRTABLE_BASE_ID:
-    raise ValueError("Missing Airtable credentials in environment variables.")
+CLOSED_STAGES = ["Closed-Won", "Closed-Lost"]
 
-# Initialize Airtable API
-api = Api(AIRTABLE_PAT)
-base = api.base(AIRTABLE_BASE_ID)
+_pool: Optional[asyncpg.Pool] = None
 
-# Table References
-users_table = base.table("users")
-contacts_table = base.table("contacts")
-interactions_table = base.table("interactions")
 
-# --- UTILS ---
+async def init_pool() -> asyncpg.Pool:
+    """Create the module-wide connection pool.
 
-def calculate_heat_score(contact_record: Dict[str, Any]) -> Dict[str, Any]:
+    Call once at startup (main.py lifespan) before any other db.* function.
     """
-    Calculates dynamic heat score:
-    score = 100 - (days_since_last_update * 5) + (interaction_count * 3)
-    """
-    fields = contact_record.get("fields", {})
-    last_updated_str = fields.get("last_updated")
-    interaction_count = fields.get("interaction_count", 0)
+    global _pool
+    if _pool is None:
+        dsn = os.getenv("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL is not set")
+        # statement_cache_size=0: Neon's pooled endpoint fronts PgBouncer in
+        # transaction mode, where server-side prepared statements break.
+        _pool = await asyncpg.create_pool(dsn, statement_cache_size=0)
+    return _pool
 
-    if last_updated_str:
-        last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
-        days_since = (datetime.now(timezone.utc) - last_updated).days
+
+async def close_pool() -> None:
+    """Close the pool. Call once at shutdown (main.py lifespan)."""
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+
+
+def _get_pool() -> asyncpg.Pool:
+    if _pool is None:
+        raise RuntimeError("db pool not initialized — call db.init_pool() first")
+    return _pool
+
+
+def _validate_stage(stage: str) -> None:
+    if stage not in STAGES:
+        raise ValueError(f"Invalid stage: {stage!r} (valid: {', '.join(STAGES)})")
+
+
+# --- HEAT SCORE ---
+
+def calculate_heat_score(lead: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute the dynamic heat score for a lead dict (never stored).
+
+    score = recency (0-60) + engagement (0-15) + deal size (0-25), clamped 0-100.
+    - recency: 60 at day 0, minus 6 per day since last activity; a lead with no
+      logged interactions gets 0 recency — never-touched leads read cold.
+    - engagement: 3 points per logged interaction, capped at 15.
+    - deal size: log10-scaled est_deal_value, ~5 points per order of magnitude
+      above 1,000, capped at 25 — so a 10,000-seat deal outranks a 4-desk deal
+      at equal recency.
+    """
+    interaction_count = lead.get("interaction_count") or 0
+    last_activity = lead.get("last_activity_at")
+
+    if interaction_count > 0 and last_activity is not None:
+        days_since = (datetime.now(timezone.utc) - last_activity).days
+        recency = max(0, 60 - days_since * 6)
     else:
-        days_since = 0
+        recency = 0
 
-    score = 100 - (days_since * 5) + (interaction_count * 3)
-    score = max(0, min(100, score))
+    engagement = min(15, interaction_count * 3)
+
+    value = float(lead.get("est_deal_value") or 0)
+    value_points = min(25.0, max(0.0, (math.log10(value) - 3) * 5)) if value > 0 else 0.0
+
+    score = int(round(min(100, recency + engagement + value_points)))
 
     if score >= 70:
         label = "Hot"
@@ -54,142 +99,290 @@ def calculate_heat_score(contact_record: Dict[str, Any]) -> Dict[str, Any]:
 
     return {"score": score, "label": label}
 
+
+def _lead_with_heat(row: asyncpg.Record) -> Dict[str, Any]:
+    lead = dict(row)
+    lead["heat_score"] = calculate_heat_score(lead)
+    return lead
+
+
+# interaction_count is derived at read time (no stored counter to drift).
+_LEAD_SELECT = """
+    SELECT l.*,
+           (SELECT count(*) FROM interactions i WHERE i.lead_id = l.id)::int
+               AS interaction_count
+    FROM leads l
+"""
+
+
 # --- USER FUNCTIONS ---
 
-def create_user(user_id: str, first_name: str, email: str, company: str):
-    """Creates a new user record from the landing page/signup flow."""
-    return users_table.create({
-        "user_id": user_id,
-        "first_name": first_name,
-        "email": email,
-        "company": company,
-        "joined_at": datetime.now(timezone.utc).isoformat()
-    })
+async def create_user(
+    telegram_id: int,
+    first_name: str,
+    email: Optional[str] = None,
+    company: Optional[str] = None,
+    role: str = "rep",
+) -> Dict[str, Any]:
+    """Create a user keyed on their Telegram ID. role: 'rep' or 'manager'."""
+    row = await _get_pool().fetchrow(
+        """
+        INSERT INTO users (telegram_id, first_name, email, company, role)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+        """,
+        int(telegram_id), first_name, email, company, role,
+    )
+    return dict(row)
 
-def get_user_by_telegram_id(telegram_id: int):
-    """Retrieves a user based on their unique Telegram ID."""
-    formula = match({"telegram_id": int(telegram_id)})
-    record = users_table.first(formula=formula)
-    return record if record else None
 
-def link_telegram_to_user(user_id: str, telegram_id: int):
-    """Links a specific user_id (from signup) to a Telegram ID."""
-    record = users_table.first(formula=match({"user_id": user_id}))
-    if record:
-        return users_table.update(record["id"], {"telegram_id": int(telegram_id)})
-    return None
+async def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
+    row = await _get_pool().fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1", int(telegram_id)
+    )
+    return dict(row) if row else None
 
-def get_all_users() -> List[Dict]:
-    """Returns all registered users who have linked their Telegram account."""
-    return users_table.all(formula="NOT({telegram_id}='')")
 
-# --- CONTACT FUNCTIONS ---
+async def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+    row = await _get_pool().fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    return dict(row) if row else None
 
-def create_contact(name: str, company: str, role: str, source: str, user_id: str):
-    """Initializes a new lead in the pipeline."""
-    return contacts_table.create({
-        "name": name,
-        "company": company,
-        "role": role,
-        "source": source,
-        "user_id": user_id,
-        "stage": "Lead",
-        "interaction_count": 0,
-        "last_updated": datetime.now(timezone.utc).isoformat()
-    })
 
-def find_contact(partial_name: str, user_id: str) -> List[Dict]:
-    """Case-insensitive search for contacts belonging to a specific user."""
-    formula = f"AND({{user_id}}='{user_id}', FIND(LOWER('{partial_name}'), LOWER({{name}})))"
-    return contacts_table.all(formula=formula)
+async def get_all_users() -> List[Dict[str, Any]]:
+    rows = await _get_pool().fetch("SELECT * FROM users ORDER BY joined_at")
+    return [dict(r) for r in rows]
 
-def get_contact_by_id(contact_id: str):
-    """Fetch a single contact by Airtable Record ID."""
-    return contacts_table.get(contact_id)
 
-def update_contact_stage(contact_id: str, stage: str):
-    """Updates the pipeline stage and refreshes the last_updated timestamp."""
-    valid_stages = ["Lead", "Evaluating", "Proposal Sent", "Negotiating", "Won", "Lost"]
-    if stage not in valid_stages:
-        raise ValueError(f"Invalid stage: {stage}")
-    
-    return contacts_table.update(contact_id, {
-        "stage": stage,
-        "last_updated": datetime.now(timezone.utc).isoformat()
-    })
+# --- COMPANY FUNCTIONS ---
 
-def update_contact_next_action(contact_id: str, next_action: str):
-    """Updates the 'Next Action' field for a contact."""
-    return contacts_table.update(contact_id, {"next_action": next_action})
+async def find_or_create_company(
+    name: str,
+    industry: Optional[str] = None,
+    city: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Find a company by case-insensitive exact name, or create it."""
+    pool = _get_pool()
+    row = await pool.fetchrow(
+        "SELECT * FROM companies WHERE lower(name) = lower($1)", name
+    )
+    if row:
+        return dict(row)
+    row = await pool.fetchrow(
+        "INSERT INTO companies (name, industry, city) VALUES ($1, $2, $3) RETURNING *",
+        name, industry, city,
+    )
+    return dict(row)
 
-def get_all_contacts(user_id: str) -> Dict[str, List[Dict]]:
-    """Returns all contacts for a user, grouped by their pipeline stage."""
-    formula = match({"user_id": user_id})
-    records = contacts_table.all(formula=formula)
-    
-    pipeline = {
-        "Lead": [], "Evaluating": [], "Proposal Sent": [], 
-        "Negotiating": [], "Won": [], "Lost": []
-    }
-    
-    for rec in records:
-        stage = rec["fields"].get("stage", "Lead")
-        # Attach dynamic heat score before returning
-        rec["heat_score"] = calculate_heat_score(rec)
-        if stage in pipeline:
-            pipeline[stage].append(rec)
-            
+
+async def get_company_by_id(company_id: int) -> Optional[Dict[str, Any]]:
+    row = await _get_pool().fetchrow(
+        "SELECT * FROM companies WHERE id = $1", company_id
+    )
+    return dict(row) if row else None
+
+
+# --- LEAD FUNCTIONS ---
+
+async def create_lead(
+    contact_name: str,
+    company_id: Optional[int] = None,
+    contact_role: Optional[str] = None,
+    phone: Optional[str] = None,
+    stage: str = "Inquiry",
+    seat_count: Optional[int] = None,
+    city: Optional[str] = None,
+    space_type: Optional[str] = None,
+    budget_per_seat: Optional[float] = None,
+    est_deal_value: Optional[float] = None,
+    move_in_date: Optional[str] = None,
+    assigned_to: Optional[int] = None,
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+    _validate_stage(stage)
+    row = await _get_pool().fetchrow(
+        """
+        INSERT INTO leads (
+            contact_name, company_id, contact_role, phone, stage, seat_count,
+            city, space_type, budget_per_seat, est_deal_value, move_in_date,
+            assigned_to, source
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING *
+        """,
+        contact_name, company_id, contact_role, phone, stage, seat_count,
+        city, space_type, budget_per_seat, est_deal_value, move_in_date,
+        assigned_to, source,
+    )
+    lead = dict(row)
+    lead["interaction_count"] = 0
+    lead["heat_score"] = calculate_heat_score(lead)
+    return lead
+
+
+async def find_leads(
+    partial_name: str,
+    assigned_to: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Case-insensitive substring search on contact_name (parameterized ILIKE)."""
+    pattern = f"%{partial_name}%"
+    if assigned_to is None:
+        rows = await _get_pool().fetch(
+            _LEAD_SELECT + " WHERE l.contact_name ILIKE $1 ORDER BY l.last_activity_at DESC",
+            pattern,
+        )
+    else:
+        rows = await _get_pool().fetch(
+            _LEAD_SELECT
+            + " WHERE l.contact_name ILIKE $1 AND l.assigned_to = $2"
+            + " ORDER BY l.last_activity_at DESC",
+            pattern, assigned_to,
+        )
+    return [_lead_with_heat(r) for r in rows]
+
+
+async def get_lead_by_id(lead_id: int) -> Optional[Dict[str, Any]]:
+    row = await _get_pool().fetchrow(_LEAD_SELECT + " WHERE l.id = $1", lead_id)
+    return _lead_with_heat(row) if row else None
+
+
+async def update_lead_stage(lead_id: int, stage: str) -> Dict[str, Any]:
+    _validate_stage(stage)
+    row = await _get_pool().fetchrow(
+        "UPDATE leads SET stage = $2, last_activity_at = now() WHERE id = $1 RETURNING *",
+        lead_id, stage,
+    )
+    return dict(row)
+
+
+_UPDATABLE_LEAD_COLUMNS = {
+    "contact_name", "contact_role", "phone", "seat_count", "city",
+    "space_type", "budget_per_seat", "est_deal_value", "move_in_date",
+    "company_id", "assigned_to", "source",
+}
+
+
+async def update_lead(lead_id: int, **fields: Any) -> Dict[str, Any]:
+    """Update whitelisted lead columns. Use update_lead_stage() for stage changes."""
+    invalid = set(fields) - _UPDATABLE_LEAD_COLUMNS
+    if invalid:
+        raise ValueError(f"Cannot update lead columns: {', '.join(sorted(invalid))}")
+    if not fields:
+        raise ValueError("No fields to update")
+
+    columns = sorted(fields)
+    assignments = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(columns))
+    row = await _get_pool().fetchrow(
+        f"UPDATE leads SET {assignments} WHERE id = $1 RETURNING *",
+        lead_id, *(fields[col] for col in columns),
+    )
+    return dict(row)
+
+
+async def assign_lead(lead_id: int, user_id: Optional[int]) -> Dict[str, Any]:
+    """Assign (or unassign, with None) a lead to a user."""
+    return await update_lead(lead_id, assigned_to=user_id)
+
+
+async def get_all_leads(
+    assigned_to: Optional[int] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """All leads grouped by stage, heat_score injected.
+
+    assigned_to=None returns the team-wide pipeline (manager view);
+    pass a users.id to scope to one rep.
+    """
+    if assigned_to is None:
+        rows = await _get_pool().fetch(
+            _LEAD_SELECT + " ORDER BY l.last_activity_at DESC"
+        )
+    else:
+        rows = await _get_pool().fetch(
+            _LEAD_SELECT + " WHERE l.assigned_to = $1 ORDER BY l.last_activity_at DESC",
+            assigned_to,
+        )
+
+    pipeline: Dict[str, List[Dict[str, Any]]] = {stage: [] for stage in STAGES}
+    for row in rows:
+        pipeline[row["stage"]].append(_lead_with_heat(row))
     return pipeline
 
-def mark_won(contact_id: str):
-    return update_contact_stage(contact_id, "Won")
 
-def mark_lost(contact_id: str):
-    return update_contact_stage(contact_id, "Lost")
+async def mark_won(lead_id: int) -> Dict[str, Any]:
+    return await update_lead_stage(lead_id, "Closed-Won")
 
-def increment_interaction_count(contact_id: str):
-    """Increments the interaction counter for heat score calculation."""
-    record = contacts_table.get(contact_id)
-    current_count = record["fields"].get("interaction_count", 0)
-    return contacts_table.update(contact_id, {
-        "interaction_count": current_count + 1,
-        "last_updated": datetime.now(timezone.utc).isoformat()
-    })
 
-def get_stale_contacts(user_id: str, days: int = 3) -> List[Dict]:
-    """Returns contacts that haven't been updated in N days."""
-    formula = match({"user_id": user_id})
-    records = contacts_table.all(formula=formula)
-    stale = []
-    
-    for rec in records:
-        last_updated_str = rec["fields"].get("last_updated")
-        if last_updated_str:
-            last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
-            delta = (datetime.now(timezone.utc) - last_updated).days
-            if delta >= days and rec["fields"].get("stage") not in ["Won", "Lost"]:
-                rec["heat_score"] = calculate_heat_score(rec)
-                stale.append(rec)
-    return stale
+async def mark_lost(lead_id: int) -> Dict[str, Any]:
+    return await update_lead_stage(lead_id, "Closed-Lost")
+
+
+async def get_stale_leads(
+    days: int = 3,
+    assigned_to: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Open leads with no activity for >= `days` days, heat_score injected."""
+    query = (
+        _LEAD_SELECT
+        + " WHERE l.last_activity_at <= now() - make_interval(days => $1)"
+        + " AND NOT (l.stage = ANY($2::lead_stage[]))"
+    )
+    args: List[Any] = [days, CLOSED_STAGES]
+    if assigned_to is not None:
+        query += " AND l.assigned_to = $3"
+        args.append(assigned_to)
+    query += " ORDER BY l.last_activity_at ASC"
+
+    rows = await _get_pool().fetch(query, *args)
+    return [_lead_with_heat(r) for r in rows]
+
 
 # --- INTERACTION FUNCTIONS ---
 
-def log_interaction(contact_id: str, type: str, raw_content: str, ai_summary: str, telegram_message_id: str = None):
-    """Logs a new interaction (forwarded text, voice, etc.) linked to a contact."""
-    # We also increment the count and update last_updated on the contact
-    increment_interaction_count(contact_id)
-    
-    return interactions_table.create({
-        "contact_id": contact_id,
-        "type": type,
-        "raw_content": raw_content,
-        "ai_summary": ai_summary,
-        "telegram_message_id": telegram_message_id if telegram_message_id else 0,
-        "logged_on": datetime.now(timezone.utc).isoformat()
-    })
+async def log_interaction(
+    lead_id: int,
+    type: str,
+    raw_content: str,
+    ai_summary: str,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Insert an interaction and bump the lead's last_activity_at atomically.
 
-def get_interactions(contact_id: str, limit: int = 5):
-    """Retrieves the most recent interactions for a contact."""
-    formula = f"{{contact_id}}='{contact_id}'"
-    records = interactions_table.all(formula=formula, sort=["-logged_on"])
-    return records[:limit]
+    type: whatsapp_forward | voice_note | screenshot | addnote_command
+    """
+    pool = _get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO interactions (lead_id, user_id, type, raw_content, ai_summary)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+                """,
+                lead_id, user_id, type, raw_content, ai_summary,
+            )
+            await conn.execute(
+                "UPDATE leads SET last_activity_at = now() WHERE id = $1", lead_id
+            )
+    return dict(row)
+
+
+async def get_interactions(lead_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+    rows = await _get_pool().fetch(
+        "SELECT * FROM interactions WHERE lead_id = $1 ORDER BY logged_at DESC LIMIT $2",
+        lead_id, limit,
+    )
+    return [dict(r) for r in rows]
+
+
+# --- SPACE FUNCTIONS ---
+
+async def get_all_spaces(city: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Inventory read for the stretch matching feature; optional city filter."""
+    if city is None:
+        rows = await _get_pool().fetch(
+            "SELECT * FROM spaces ORDER BY city, name"
+        )
+    else:
+        rows = await _get_pool().fetch(
+            "SELECT * FROM spaces WHERE lower(city) = lower($1) ORDER BY name", city
+        )
+    return [dict(r) for r in rows]

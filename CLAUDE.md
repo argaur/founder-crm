@@ -2,9 +2,17 @@
 
 This file provides guidance to Claude Code when working with code in this repository.
 
-**Framework state:** NOT YET SET — run `/rubric` once a Stylework vertical is chosen
-(see `STYLEWORK_CONTEXT.md`). Do not run it against this codebase as-is; the eventual
-solution direction may look nothing like the current Founder CRM.
+**Framework state:** Blueprint/`/rubric` explicitly skipped for this project — timeline
+(ship by 2026-07-17) doesn't allow for it. Vertical chosen: **Stylework B2B Sales**.
+Working directly off `IMPLEMENTATION_PLAN.md` instead. See
+`memory/decision-b2b-vertical-and-db-migration.md` for the reasoning this plan is
+built on.
+
+**Agent policy for this project:** `Agent` tool dispatches split by purpose —
+`model: "fable"` (Fable 5) for planning/strategy/research/design-brief agents,
+`model: "opus"` (latest Opus) for execution/code-writing agents. Both are
+project-specific overrides, not the general default. (Updated 2026-07-16,
+mid-build — see `memory/feedback-fable5-only.md`.)
 
 ## What this is
 Merged from two previously separate repos (`founder-crm-bot`, `founder-crm-landing`)
@@ -30,7 +38,8 @@ python main.py                          # starts bot (polling) + FastAPI on port
 uvicorn main:app --host 0.0.0.0 --port $PORT   # Railway Procfile command
 
 # Bot — seed demo data
-python seed.py                          # populates demo-gaurav-001 with 8 contacts
+python seed.py --seed                   # 1 manager + 2 reps + 13 leads across all 7 stages
+python seed.py --clear                  # removes only the rows seed.py created
 
 # Bot — extraction accuracy eval
 python eval/score_extraction.py                      # print field-level accuracy
@@ -42,33 +51,39 @@ cd landing
 python -m http.server 8080    # then open http://localhost:8080
 ```
 
-No end-to-end test suite exists for either side — verify bot changes by running
-locally against Telegram; verify the dashboard against the live Railway API.
+No end-to-end test suite exists for either side — verify bot/API changes by running
+`bot/main.py` locally and doing real `curl` round-trips (or against Telegram directly
+for bot commands); verify the dashboard by serving `landing/` statically alongside a
+locally-running `bot/main.py`. See `bot/CLAUDE.md` and `landing/CLAUDE.md` for the
+full detail on each surface — this file only covers what's shared/cross-cutting.
 
 ## Architecture
 
-### bot/ — five source files, single asyncio process
+### bot/ — five source files, single asyncio process, fully async
 ```
-main.py      — FastAPI lifespan wires everything: bot polling on startup
-db.py        — Airtable via pyairtable (SYNCHRONOUS — never await these calls)
-ai.py        — Claude Haiku + OpenAI Whisper (SYNCHRONOUS — never await these calls)
+main.py      — FastAPI lifespan wires everything: bot polling (if TELEGRAM_BOT_TOKEN
+               set — else API-only mode) + nudge JobQueue on startup, /api/* endpoints
+db.py        — asyncpg queries against Neon Postgres (ASYNC — always await these calls)
+ai.py        — AsyncAnthropic (Claude Haiku) + OpenAI Whisper (ASYNC — always await)
 commands.py  — All slash command handlers (/pipeline, /context, /won, /lost, /ask, /addcontact)
 flows.py     — All message capture handlers (forwarded text, voice, image, /addnote, /note)
 ```
 
 ### landing/ — static, no framework, no bundler
 ```
-index.html       — Landing page (marketing) + signup form
-dashboard/       — Dashboard SPA (contacts pipeline view), config in gitignored config.js
-style.css        — Shared styles (Tailwind CDN handles most)
+index.html       — Landing page (marketing) + signup form — DESIGN_BRIEF.md reference impl
+dashboard/       — Dashboard SPA: rep pipeline view + role-gated manager ("Team") view,
+                   authenticated against bot/'s /api/* endpoints, config in gitignored config.js
+style.css        — Shared styles (minimal — most styling is inline per-page)
 assets/          — Static assets
 ```
 
 ## Critical Constraints
 
-**Sync/async split:** `bot/db.py` and `bot/ai.py` are fully synchronous — pyairtable
-and the Anthropic SDK do not support async. All handlers in `commands.py`/`flows.py`
-are async (python-telegram-bot v21). Never add `await` to any `db.*` or `ai.*` call.
+**Async everywhere:** `bot/db.py` and `bot/ai.py` are fully async — `asyncpg` and
+`AsyncAnthropic` both support it natively. Every `db.*`/`ai.*` call must be `await`ed.
+(This inverts an earlier sync-Airtable-era constraint — see `bot/CLAUDE.md` if you
+find stale references to "never await" anywhere.)
 
 **Handler registration order in `bot/main.py`:**
 1. `commands.get_handlers()` — all slash commands + ConversationHandler for `/addcontact`
@@ -78,25 +93,24 @@ are async (python-telegram-bot v21). Never add `await` to any `db.*` or `ai.*` c
 If the order is swapped, text replies during ConversationHandler flows get
 intercepted by the forward/text capture handler.
 
-**Airtable record structure:**
-- `rec["id"]` → Airtable record ID (e.g. `rec8uEn16M5rbB9Th`)
-- `rec["fields"]["name"]` → contact name (never access fields at the top level)
-- `rec["heat_score"]` → `{"score": int, "label": str}` injected by `get_all_contacts()`,
-  NOT stored in Airtable
+**Lead record structure:** `db.py` returns flat dicts (Postgres rows), not Airtable's
+nested `{id, fields: {...}}` shape — `lead["id"]` is a Postgres bigserial int,
+`lead["contact_name"]`/`lead["stage"]`/`lead["seat_count"]`/etc. are top-level keys,
+and `lead["heat_score"]` (`{"score": int, "label": str}`) is computed dynamically by
+`db.calculate_heat_score()`, never stored. Full detail in `bot/CLAUDE.md`.
 
-**pyairtable sort syntax:** Strings only — `sort=["-logged_on"]` for desc,
-`sort=["logged_on"]` for asc. Never pass dicts — crashes with
-`AttributeError: 'dict' object has no attribute 'startswith'`.
-
-**Callback data separator:** Uses `:` (colon) throughout, not `_` (underscore).
-Airtable record IDs contain underscores — splitting on `_` would corrupt them.
-Always `split(":", 1)` or `split(":", 2)`.
+**Callback data separator:** Uses `:` (colon) throughout, not `_` (underscore), for
+Telegram inline-keyboard callback data — kept from the original design even though
+Postgres ids are plain integers now (no longer strictly required for id-safety, but
+changing it isn't in scope). Always `split(":", 1)` or `split(":", 2)`.
 
 **Dashboard config:** `landing/dashboard/config.js` is gitignored — copy
-`config.example.js` to `config.js` and fill in a real, rotated Airtable PAT.
-Never hardcode credentials directly in `index.html` (a prior version of this
-dashboard did exactly that and leaked a PAT into a public repo — see
-`STYLEWORK_CONTEXT.md` known-limitations note).
+`config.example.js` to `config.js` and fill in `API_BASE_URL` (no credentials belong
+in this file anymore — the dashboard authenticates via signed per-user tokens against
+`bot/main.py`, not a database credential shipped to the browser). A prior version of
+this dashboard called Airtable directly from the browser with a client-side PAT — a
+real credential-exposure bug, now closed; see `memory/project-founder-crm-security-note.md`
+and `landing/CLAUDE.md` for the auth flow that replaced it.
 
 ## Data Flow: Capture Path
 
@@ -110,40 +124,64 @@ if "recall": generate brief; if "capture": `ai.extract_from_voice()` →
 Image/screenshot → `image_handler` → `ai.extract_from_image()` (Claude Vision) →
 `_save_capture()`
 
-`_save_capture()` in `flows.py` is the shared write path: find-or-create contact,
-`db.log_interaction()` (also calls `db.increment_interaction_count()`), then sends
-confirmation card with "Looks good / Edit stage" inline keyboard.
+`_save_capture()` in `flows.py` is the shared write path: find-or-create company +
+lead, `db.log_interaction()` (transactionally bumps `last_activity_at`), then sends a
+confirmation card with "Looks good / Edit stage" inline keyboard. It never
+auto-regresses a lead's stage backwards from a vague recapture.
 
-## Airtable Tables
+## Postgres Schema (`bot/schema.sql`)
 
-Three tables: `users`, `contacts`, `interactions`.
+Five tables: `users`, `companies`, `leads`, `interactions`, `spaces`.
 
-- `contacts.stage` valid values: `Lead`, `Evaluating`, `Proposal Sent`,
-  `Negotiating`, `Won`, `Lost`
-- `contacts.heat_score` computed dynamically:
-  `100 - (days_since_last_update * 5) + (interaction_count * 3)`, clamped 0–100
-- `interactions.source` values: `whatsapp_forward`, `voice_note`, `screenshot`,
-  `addnote_command`
-- Demo data lives under `user_id="demo-gaurav-001"`
+- `leads.stage` — 7-value enum: `Inquiry`, `Qualified`, `Site Visit`, `Proposal`,
+  `Negotiation`, `Closed-Won`, `Closed-Lost` (single source of truth: `db.STAGES`)
+- `leads.space_type` — enum: `Dedicated Desk`, `Private Cabin`, `Managed Office`, `Day Pass`
+- `leads.heat_score` is NOT a column — computed dynamically, see above
+- `interactions.type` — enum: `whatsapp_forward`, `voice_note`, `screenshot`,
+  `addnote_command` (dashboard-created notes map onto `addnote_command`, there is no
+  separate `dashboard_note`/`manual_note` value)
+- `spaces` — inventory rows for the (stretch, not built) matching feature, seeded once
+  by `bot/scripts/apply_schema.py`
+- Demo data (1 manager + 2 reps + 13 leads across all 7 stages) lives under fixed
+  negative `telegram_id`s seeded by `bot/seed.py --seed`
 
 ## Environment Variables
 
 ```
-TELEGRAM_BOT_TOKEN
-AIRTABLE_PAT
-AIRTABLE_BASE_ID
-ANTHROPIC_API_KEY
-OPENAI_API_KEY
-APP_BASE_URL          # Railway URL — used in /start deep link and signup redirect
-BOT_NAME              # Telegram bot username without @ — used for deep links
+TELEGRAM_BOT_TOKEN      # blank → bot starts in API-only mode (dashboard/API still work)
+BOT_NAME                # Telegram bot username without @ — used for deep links
+DATABASE_URL            # Neon pooled connection string
+OPENAI_API_KEY          # required for all AI: extraction/reasoning (gpt-4o-mini) + transcription (Whisper)
+APP_BASE_URL            # Railway URL — used in /start deep link and signup redirect
+DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
 ```
 
 ## Deployment
-- `bot/` → Railway (`Procfile`, `railway.json`)
-- `landing/` → GitHub Pages (redeploy target/URL TBD post-merge)
+- `bot/` → Railway (`Procfile`, `railway.json`), FastAPI served via `uvicorn main:app`
+- `landing/` → GitHub Pages (https://argaur.github.io/founder-crm/)
 
 ## Status
-- **State:** merged base, awaiting Stylework vertical decision
-- **Current task:** none — see `STYLEWORK_CONTEXT.md` next step
-- **Blocker:** Stylework vertical not yet chosen
-- **Last updated:** 2026-07-16
+- **State:** Phases 0-7 built and live-verified on branch `stylework-migration`.
+  Neon Postgres schema, fully async `db.py`/`ai.py`/`commands.py`/`flows.py`/`main.py`,
+  nudge job, all `/api/*` endpoints, HMAC dashboard auth (Phases 0-5). Dashboard fully
+  rewired off direct-Airtable onto the authenticated API, restyled to `DESIGN_BRIEF.md`'s
+  light/monochrome system, manager ("Team") view built — all live-verified via real
+  `curl` round-trips against Neon, including 403 enforcement for non-manager roles
+  (Phase 6). `seed.py` rewritten for the new schema (1 manager + 2 reps + 13 leads
+  across all 7 stages, several cities) and live-verified; `eval/dataset.jsonl` +
+  `score_extraction.py` ported to the coworking domain and the new extraction call,
+  but not yet run — see Blocker (Phase 7). Both `CLAUDE.md`s and this file's docs
+  brought current, `bot/README.md` rewritten as a portfolio case-study section
+  (Phase 8). AI provider consolidated from Anthropic+OpenAI onto OpenAI alone
+  (`gpt-4o-mini` for extraction/reasoning + Whisper for transcription, one API key,
+  Gaurav's call on 2026-07-17 to reduce accounts to manage) — `anthropic` dropped from
+  `requirements.txt`, `ANTHROPIC_API_KEY` removed everywhere.
+- **Current task:** Phase 9 — a full end-to-end demo-spine walkthrough with the bot
+  actually polling Telegram, plus running the eval, once the blocker below clears.
+- **Blocker:** `TELEGRAM_BOT_TOKEN` and `OPENAI_API_KEY` are still blank in `bot/.env`
+  (`DATABASE_URL` and `DASHBOARD_TOKEN_SECRET` are set) — deliberately deferred to the
+  end of the build per Gaurav's call on 2026-07-17. No browser automation was
+  available this session (Chrome extension not connected), so dashboard UI
+  verification was real API round-trips + careful static review, not rendered
+  screenshots — worth a manual click-through before the final demo.
+- **Last updated:** 2026-07-17

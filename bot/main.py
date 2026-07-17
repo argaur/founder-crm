@@ -1,9 +1,9 @@
 """
-main.py — Entry point for Founder CRM.
+main.py — Entry point for the Stylework B2B Sales CRM.
 
 Runs two services in the same asyncio event loop:
-  1. Telegram bot (python-telegram-bot v21, polling mode)
-  2. FastAPI web server (uvicorn)
+  1. Telegram bot (python-telegram-bot v21, polling mode) + JobQueue nudges
+  2. FastAPI web server (uvicorn) — dashboard API + landing signup
 
 Usage:
   python main.py          # local development
@@ -14,18 +14,24 @@ Railway Procfile:
   (Note: when Railway runs uvicorn main:app, the lifespan handler starts the bot.)
 """
 
-import asyncio
+import base64
+import hashlib
+import hmac
+import json
 import logging
 import os
-import uuid
+import secrets
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from contextlib import asynccontextmanager
-from telegram.ext import ApplicationBuilder
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes
 
 import db
 import commands
@@ -45,14 +51,225 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "")
 BOT_NAME = os.getenv("BOT_NAME", "")  # e.g. "foundercrm_bot" (without @)
 
-if not TELEGRAM_BOT_TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in environment.")
+# Nudge job tuning. For a live demo test, shrink via env before starting:
+#   NUDGE_INTERVAL_SECONDS=30 NUDGE_FIRST_DELAY_SECONDS=5 NUDGE_RENOTIFY_HOURS=0
+# and (optionally) NUDGE_STALE_DAYS=0 so freshly-seeded leads count as stale.
+NUDGE_INTERVAL_SECONDS = int(os.getenv("NUDGE_INTERVAL_SECONDS", str(4 * 3600)))
+NUDGE_FIRST_DELAY_SECONDS = int(os.getenv("NUDGE_FIRST_DELAY_SECONDS", "90"))
+NUDGE_STALE_DAYS = int(os.getenv("NUDGE_STALE_DAYS", "3"))
+# In-memory re-notify guard so a 4h interval doesn't DM the same stale lead
+# six times a day. Resets on restart; set to 0 when testing.
+NUDGE_RENOTIFY_HOURS = float(os.getenv("NUDGE_RENOTIFY_HOURS", "24"))
+
+ACTIVE_STAGES = [s for s in db.STAGES if s not in db.CLOSED_STAGES]
+
+# interactions.type is a Postgres enum with exactly these values — the schema
+# has no "dashboard_note", so dashboard notes map onto addnote_command.
+VALID_NOTE_SOURCES = {"whatsapp_forward", "voice_note", "screenshot", "addnote_command"}
+
+
+# ─── Signed dashboard tokens (stdlib HMAC, no new dependency) ──
+# Deliberate 1-day-demo simplification (per IMPLEMENTATION_PLAN Phase 5):
+# a signed, non-expiring token embedded in each user's dashboard link,
+# verified per-request. Not OAuth, no revocation, no expiry.
+
+def _signing_key() -> bytes:
+    return os.environ["DASHBOARD_TOKEN_SECRET"].encode()
+
+
+def make_dashboard_token(user_id: int, role: str) -> str:
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"uid": int(user_id), "role": role}, separators=(",", ":")).encode()
+    ).rstrip(b"=")
+    signature = hmac.new(_signing_key(), payload, hashlib.sha256).hexdigest()
+    return f"{payload.decode()}.{signature}"
+
+
+def verify_dashboard_token(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        payload_b64, signature = token.split(".", 1)
+        expected = hmac.new(_signing_key(), payload_b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return None
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        if not isinstance(payload.get("uid"), int):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+async def require_user(request: Request) -> Dict[str, Any]:
+    """Auth dependency: Bearer header preferred, ?token= fallback (link-embedded)."""
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else None
+    if not token:
+        token = request.query_params.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing dashboard token.")
+
+    payload = verify_dashboard_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid dashboard token.")
+
+    user = await db.get_user_by_id(payload["uid"])
+    if user is None:
+        raise HTTPException(status_code=401, detail="Unknown user.")
+    # Role comes from the DB row, not the token — a stale token can't keep a
+    # demoted manager's privileges.
+    return user
+
+
+async def require_manager(user: Dict[str, Any] = Depends(require_user)) -> Dict[str, Any]:
+    if user.get("role") != "manager":
+        raise HTTPException(status_code=403, detail="Manager role required.")
+    return user
+
+
+def _can_touch_lead(user: Dict[str, Any], lead: Dict[str, Any]) -> bool:
+    return user.get("role") == "manager" or lead.get("assigned_to") == user["id"]
+
+
+def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": user["id"],
+        "first_name": user["first_name"],
+        "email": user.get("email"),
+        "company": user.get("company"),
+        "role": user["role"],
+    }
+
+
+async def _company_names(leads: List[Dict[str, Any]]) -> Dict[int, str]:
+    names: Dict[int, str] = {}
+    for company_id in {l["company_id"] for l in leads if l.get("company_id")}:
+        company = await db.get_company_by_id(company_id)
+        if company:
+            names[company_id] = company["name"]
+    return names
+
+
+# ─── Automated stale-lead nudges (Phase 4) ─────────────────────
+
+def _nudge_text(lead: Dict[str, Any], company_name: Optional[str]) -> str:
+    days = max(0, (datetime.now(timezone.utc) - lead["last_activity_at"]).days)
+    bits = []
+    if company_name:
+        bits.append(company_name)
+    if lead.get("seat_count"):
+        bits.append(f"{lead['seat_count']} seats")
+    if lead.get("city"):
+        bits.append(lead["city"])
+    detail = f" ({', '.join(bits)})" if bits else ""
+    return f"🔸 {lead['contact_name']}{detail} — {days} days quiet in {lead['stage']}."
+
+
+def _nudge_keyboard(lead_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("Keep chasing ✓", callback_data=f"nudge_ack:{lead_id}"),
+        InlineKeyboardButton("Snooze", callback_data=f"nudge_snooze:{lead_id}"),
+        InlineKeyboardButton("Mark Lost", callback_data=f"nudge_lost:{lead_id}"),
+    ]])
+
+
+async def _send_nudge(bot, lead: Dict[str, Any], rep: Dict[str, Any],
+                      company_name: Optional[str]) -> None:
+    await bot.send_message(
+        chat_id=rep["telegram_id"],
+        text=_nudge_text(lead, company_name),
+        reply_markup=_nudge_keyboard(lead["id"]),
+    )
+
+
+async def nudge_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic team-wide scan: DM the assigned rep about every stale lead."""
+    try:
+        stale = await db.get_stale_leads(days=NUDGE_STALE_DAYS)
+    except Exception:
+        logger.exception("[nudge] stale-lead query failed; skipping this run")
+        return
+    if not stale:
+        return
+
+    company_names = await _company_names(stale)
+    reps: Dict[int, Optional[Dict[str, Any]]] = {}
+    nudged_at: Dict[int, datetime] = context.application.bot_data.setdefault("nudged_at", {})
+    now = datetime.now(timezone.utc)
+    sent = skipped = 0
+
+    for lead in stale:
+        try:
+            rep_id = lead.get("assigned_to")
+            if not rep_id:
+                skipped += 1
+                continue
+            if rep_id not in reps:
+                reps[rep_id] = await db.get_user_by_id(rep_id)
+            rep = reps[rep_id]
+            if not rep or not rep.get("telegram_id"):
+                logger.warning(f"[nudge] lead {lead['id']}: rep {rep_id} unresolvable, skipping")
+                skipped += 1
+                continue
+
+            last = nudged_at.get(lead["id"])
+            if last and (now - last).total_seconds() < NUDGE_RENOTIFY_HOURS * 3600:
+                skipped += 1
+                continue
+
+            await _send_nudge(context.bot, lead, rep, company_names.get(lead.get("company_id")))
+            nudged_at[lead["id"]] = now
+            sent += 1
+        except Exception:
+            logger.exception(f"[nudge] failed for lead {lead.get('id')}; continuing")
+
+    logger.info(f"[nudge] run complete: {len(stale)} stale, {sent} sent, {skipped} skipped")
+
+
+async def nudge_callback(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles Keep chasing / Snooze / Mark Lost taps on nudge DMs."""
+    query = update.callback_query
+    action, lead_id_str = query.data.split(":", 1)
+    lead_id = int(lead_id_str)
+    base_text = query.message.text if query.message else ""
+
+    try:
+        if action == "nudge_ack":
+            await query.answer("On it.")
+            await query.edit_message_text(f"{base_text}\n✓ Kept on your list — chase it.")
+
+        elif action == "nudge_snooze":
+            # db.update_lead's whitelist doesn't include last_activity_at, so the
+            # snooze is a logged interaction — log_interaction bumps
+            # last_activity_at atomically, which resets the staleness clock
+            # without touching the stage. Bonus: the snooze shows in history.
+            user = await db.get_user_by_telegram_id(update.effective_user.id)
+            await db.log_interaction(
+                lead_id=lead_id,
+                type="addnote_command",
+                raw_content="Snoozed from stale-lead nudge",
+                ai_summary=f"Nudge snoozed — follow-up timer reset for {NUDGE_STALE_DAYS} days.",
+                user_id=user["id"] if user else None,
+            )
+            context.application.bot_data.setdefault("nudged_at", {}).pop(lead_id, None)
+            await query.answer(f"Snoozed {NUDGE_STALE_DAYS} days.")
+            await query.edit_message_text(f"{base_text}\n💤 Snoozed — I'll check back in {NUDGE_STALE_DAYS} days.")
+
+        elif action == "nudge_lost":
+            lead = await db.mark_lost(lead_id)
+            await query.answer("Marked Closed-Lost.")
+            await query.edit_message_text(
+                f"{base_text}\n✗ {lead['contact_name']} marked Closed-Lost."
+            )
+    except Exception:
+        logger.exception(f"[nudge] callback {action} failed for lead {lead_id}")
+        await query.answer("Something went wrong — try again.")
 
 
 # ─── Build the Telegram application ───────────────────────────
 
 def _build_application():
-    """Creates the PTB Application and registers all handlers."""
+    """Creates the PTB Application, registers all handlers, schedules the nudge job."""
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Register command + callback handlers from commands.py first
@@ -63,50 +280,82 @@ def _build_application():
     for handler in flows.get_handlers():
         telegram_app.add_handler(handler)
 
-    logger.info("All handlers registered.")
+    # Nudge buttons — registered after the existing handlers so the documented
+    # commands-then-flows order stays untouched (the pattern is disjoint anyway).
+    telegram_app.add_handler(
+        CallbackQueryHandler(nudge_callback, pattern="^nudge_(ack|snooze|lost):")
+    )
+
+    telegram_app.job_queue.run_repeating(
+        nudge_job,
+        interval=NUDGE_INTERVAL_SECONDS,
+        first=NUDGE_FIRST_DELAY_SECONDS,
+        name="stale_lead_nudges",
+    )
+
+    logger.info(
+        f"All handlers registered; nudge job every {NUDGE_INTERVAL_SECONDS}s "
+        f"(first run in {NUDGE_FIRST_DELAY_SECONDS}s, stale threshold {NUDGE_STALE_DAYS}d)."
+    )
     return telegram_app
+
+
+telegram_app = _build_application() if TELEGRAM_BOT_TOKEN else None
+if telegram_app is None:
+    logger.warning("TELEGRAM_BOT_TOKEN is not set — starting in API-only mode (no bot, no nudges).")
 
 
 # ─── FastAPI lifespan ─────────────────────────────────────────
 
-telegram_app = _build_application()
-
-
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
     """
-    FastAPI lifespan context manager.
-    On startup: initialise bot, start polling.
-    On shutdown: stop bot.
-
-    This runs inside the same asyncio event loop as uvicorn, so the bot's
-    async handlers all work natively.
+    Startup: DB pool first (the API is useless without it), then bot polling.
+    A bad/missing Telegram token must not take the HTTP layer down with it,
+    so bot startup failures are logged and swallowed.
     """
-    logger.info("Starting Founder CRM bot...")
+    logger.info("Starting Stylework CRM...")
+    await db.init_pool()
+    logger.info("DB pool ready.")
 
-    await telegram_app.initialize()
-    await telegram_app.start()
-    await telegram_app.updater.start_polling(drop_pending_updates=True)
-    logger.info("Telegram bot is polling.")
+    bot_started = False
+    if telegram_app is not None:
+        try:
+            await telegram_app.initialize()
+            await telegram_app.start()
+            await telegram_app.updater.start_polling(drop_pending_updates=True)
+            bot_started = True
+            logger.info("Telegram bot is polling.")
+        except Exception:
+            logger.exception("Telegram bot failed to start — continuing in API-only mode.")
 
     yield  # FastAPI serves requests here
 
     logger.info("Shutting down...")
-    await telegram_app.updater.stop()
-    await telegram_app.stop()
-    await telegram_app.shutdown()
-    logger.info("Bot stopped.")
+    if bot_started:
+        await telegram_app.updater.stop()
+        await telegram_app.stop()
+        await telegram_app.shutdown()
+        logger.info("Bot stopped.")
+    await db.close_pool()
+    logger.info("DB pool closed.")
 
 
 # ─── FastAPI app ───────────────────────────────────────────────
 
-app = FastAPI(title="Founder CRM API", lifespan=lifespan)
+app = FastAPI(title="Stylework B2B Sales CRM API", lifespan=lifespan)
 
 # Allow cross-origin requests from GitHub Pages (dashboard + landing page)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://argaur.github.io", "http://localhost", "http://127.0.0.1"],
-    allow_methods=["GET", "POST"],
+    allow_origins=[
+        "https://argaur.github.io",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -122,36 +371,295 @@ class RegisterRequest(BaseModel):
 class RegisterResponse(BaseModel):
     user_id: str
     deep_link: str
+    dashboard_token: str
 
 
-# ─── Endpoints ────────────────────────────────────────────────
+class DashboardLinkRequest(BaseModel):
+    telegram_id: Optional[int] = None
+    user_id: Optional[int] = None
+
+
+class StageUpdateRequest(BaseModel):
+    stage: str
+
+
+class NoteRequest(BaseModel):
+    content: str
+    source: str = "addnote_command"
+
+
+# ─── Public endpoints ─────────────────────────────────────────
 
 @app.get("/health")
 async def health():
     """Health check — Railway pings this to confirm the service is alive."""
-    return {"status": "ok"}
+    try:
+        pool = await db.init_pool()
+        await pool.fetchval("SELECT 1")
+        db_status = "ok"
+    except Exception:
+        logger.exception("Health check: DB unreachable")
+        db_status = "unavailable"
+    return {"status": "ok", "db": db_status}
 
 
 @app.post("/register", response_model=RegisterResponse)
 async def register(body: RegisterRequest):
     """
     Called by the landing page signup form.
-    Creates a user in Airtable and returns a Telegram deep link.
-    The user clicks the link → bot receives /start <user_id> → links their Telegram account.
-    """
-    user_id = str(uuid.uuid4())
+    Creates a user in Postgres and returns a Telegram deep link + dashboard token.
 
-    db.create_user(
-        user_id=user_id,
+    users.telegram_id is NOT NULL UNIQUE but web signup happens before Telegram
+    is linked, so the row gets a unique negative placeholder (real Telegram IDs
+    are positive — no collision). Known demo seam: /start registers by real
+    telegram_id, so the web row isn't merged with the Telegram identity yet.
+    """
+    placeholder_telegram_id = -(secrets.randbelow(2**62) + 1)
+    user = await db.create_user(
+        telegram_id=placeholder_telegram_id,
         first_name=body.first_name,
         email=body.email,
         company=body.company,
     )
-    logger.info(f"Registered new user: {user_id} ({body.email})")
+    logger.info(f"Registered new user: {user['id']} ({body.email})")
 
-    deep_link = f"https://t.me/{BOT_NAME}?start={user_id}"
+    return RegisterResponse(
+        user_id=str(user["id"]),
+        deep_link=f"https://t.me/{BOT_NAME}?start={user['id']}",
+        dashboard_token=make_dashboard_token(user["id"], user["role"]),
+    )
 
-    return RegisterResponse(user_id=user_id, deep_link=deep_link)
+
+@app.post("/dashboard-link")
+async def dashboard_link(body: DashboardLinkRequest):
+    """
+    Mints a signed dashboard token for an existing user (by telegram_id or
+    users.id). Unauthenticated by design — accepted 1-day-demo simplification,
+    same trust level as /register itself.
+    """
+    if body.telegram_id is not None:
+        user = await db.get_user_by_telegram_id(body.telegram_id)
+    elif body.user_id is not None:
+        user = await db.get_user_by_id(body.user_id)
+    else:
+        raise HTTPException(status_code=400, detail="Provide telegram_id or user_id.")
+
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    return {
+        "user_id": user["id"],
+        "first_name": user["first_name"],
+        "role": user["role"],
+        "token": make_dashboard_token(user["id"], user["role"]),
+    }
+
+
+# ─── Authenticated dashboard API ──────────────────────────────
+
+@app.get("/api/me")
+async def api_me(user: Dict[str, Any] = Depends(require_user)):
+    return _public_user(user)
+
+
+@app.get("/api/leads")
+async def api_leads(user: Dict[str, Any] = Depends(require_user)):
+    """Managers get the team-wide pipeline; reps get only their own leads."""
+    scope = None if user["role"] == "manager" else user["id"]
+    pipeline = await db.get_all_leads(assigned_to=scope)
+
+    all_leads = [lead for leads in pipeline.values() for lead in leads]
+    company_names = await _company_names(all_leads)
+    for lead in all_leads:
+        lead["company"] = company_names.get(lead.get("company_id"))
+
+    return {"user": _public_user(user), "pipeline": pipeline}
+
+
+async def _load_lead_or_403(lead_id: int, user: Dict[str, Any]) -> Dict[str, Any]:
+    lead = await db.get_lead_by_id(lead_id)
+    if lead is None:
+        raise HTTPException(status_code=404, detail=f"No lead with id {lead_id}.")
+    if not _can_touch_lead(user, lead):
+        raise HTTPException(status_code=403, detail="This lead is assigned to another rep.")
+    return lead
+
+
+@app.patch("/api/leads/{lead_id}/stage")
+async def api_update_stage(
+    lead_id: int,
+    body: StageUpdateRequest,
+    user: Dict[str, Any] = Depends(require_user),
+):
+    if body.stage not in db.STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stage {body.stage!r}. Valid: {', '.join(db.STAGES)}",
+        )
+    await _load_lead_or_403(lead_id, user)
+    await db.update_lead_stage(lead_id, body.stage)
+    updated = await db.get_lead_by_id(lead_id)
+    updated["company"] = (await _company_names([updated])).get(updated.get("company_id"))
+    return updated
+
+
+@app.post("/api/leads/{lead_id}/notes", status_code=201)
+async def api_add_note(
+    lead_id: int,
+    body: NoteRequest,
+    user: Dict[str, Any] = Depends(require_user),
+):
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Note content is empty.")
+    if body.source not in VALID_NOTE_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source {body.source!r}. Valid: {', '.join(sorted(VALID_NOTE_SOURCES))}",
+        )
+    await _load_lead_or_403(lead_id, user)
+    interaction = await db.log_interaction(
+        lead_id=lead_id,
+        type=body.source,
+        raw_content=content,
+        ai_summary=content,
+        user_id=user["id"],
+    )
+    return interaction
+
+
+@app.get("/api/leads/{lead_id}/interactions")
+async def api_lead_interactions(
+    lead_id: int,
+    user: Dict[str, Any] = Depends(require_user),
+):
+    await _load_lead_or_403(lead_id, user)
+    return await db.get_interactions(lead_id, limit=20)
+
+
+@app.get("/api/team/funnel")
+async def api_team_funnel(user: Dict[str, Any] = Depends(require_manager)):
+    """Manager-only team rollup. Shape matches DASHBOARD_MANAGER_VIEW_SPEC.md §5."""
+    pipeline = await db.get_all_leads()
+    users = await db.get_all_users()
+    stale = await db.get_stale_leads(days=NUDGE_STALE_DAYS)
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def value_of(lead: Dict[str, Any]) -> float:
+        return float(lead.get("est_deal_value") or 0)
+
+    # No closed_at column exists; mark_won/mark_lost set last_activity_at = now(),
+    # so last_activity_at is the honest available proxy for the close date.
+    def won_this_month(lead: Dict[str, Any]) -> bool:
+        return lead["last_activity_at"] >= month_start
+
+    funnel = [
+        {
+            "stage": stage,
+            "count": len(pipeline[stage]),
+            "value": sum(value_of(l) for l in pipeline[stage]),
+        }
+        for stage in db.STAGES
+    ]
+
+    active_leads = [l for s in ACTIVE_STAGES for l in pipeline[s]]
+    won_leads = [l for l in pipeline["Closed-Won"] if won_this_month(l)]
+    stale_by_rep: Dict[int, int] = {}
+    for lead in stale:
+        if lead.get("assigned_to"):
+            stale_by_rep[lead["assigned_to"]] = stale_by_rep.get(lead["assigned_to"], 0) + 1
+
+    totals = {
+        "pipeline_value": sum(value_of(l) for l in active_leads),
+        "active_leads": len(active_leads),
+        "closed_won_count": len(won_leads),
+        "closed_won_value": sum(value_of(l) for l in won_leads),
+        "stalled_count": len(stale),
+    }
+
+    all_leads = [l for leads in pipeline.values() for l in leads]
+    leads_by_rep: Dict[int, List[Dict[str, Any]]] = {}
+    for lead in all_leads:
+        if lead.get("assigned_to"):
+            leads_by_rep.setdefault(lead["assigned_to"], []).append(lead)
+
+    reps = []
+    for u in users:
+        if u["role"] != "rep" and u["id"] not in leads_by_rep:
+            continue
+        rep_leads = leads_by_rep.get(u["id"], [])
+        rep_active = [l for l in rep_leads if l["stage"] not in db.CLOSED_STAGES]
+        rep_won = [l for l in rep_leads if l["stage"] == "Closed-Won" and won_this_month(l)]
+        # Proxy: interactions aren't queryable per-user without a db.py change,
+        # so "last activity" = the freshest last_activity_at across the rep's leads.
+        last_activity = max((l["last_activity_at"] for l in rep_leads), default=None)
+        reps.append({
+            "user_id": u["id"],
+            "name": u["first_name"],
+            "active_leads": len(rep_active),
+            "pipeline_value": sum(value_of(l) for l in rep_active),
+            "closed_won_count": len(rep_won),
+            "closed_won_value": sum(value_of(l) for l in rep_won),
+            "stalled_count": stale_by_rep.get(u["id"], 0),
+            "last_activity_at": last_activity,
+        })
+    reps.sort(key=lambda r: r["pipeline_value"], reverse=True)
+
+    company_names = await _company_names(stale)
+    users_by_id = {u["id"]: u for u in users}
+    stalled = []
+    for lead in stale:
+        rep = users_by_id.get(lead.get("assigned_to"))
+        stalled.append({
+            "lead_id": lead["id"],
+            "company": company_names.get(lead.get("company_id")),
+            "contact_name": lead["contact_name"],
+            "seat_count": lead.get("seat_count"),
+            "space_type": lead.get("space_type"),
+            "city": lead.get("city"),
+            "stage": lead["stage"],
+            "est_deal_value": float(lead["est_deal_value"]) if lead.get("est_deal_value") else None,
+            "days_stalled": max(0, (now - lead["last_activity_at"]).days),
+            "assigned_to": {"user_id": rep["id"], "name": rep["first_name"]} if rep else None,
+        })
+    stalled.sort(key=lambda s: s["days_stalled"], reverse=True)
+
+    return {
+        "period": {"month": now.strftime("%Y-%m")},
+        "totals": totals,
+        "funnel": funnel,
+        "reps": reps,
+        "stalled": stalled,
+    }
+
+
+@app.post("/api/leads/{lead_id}/nudge", status_code=204)
+async def api_manual_nudge(
+    lead_id: int,
+    user: Dict[str, Any] = Depends(require_manager),
+):
+    """Manager-triggered version of the automatic Phase 4 nudge (spec §5 item 7)."""
+    lead = await db.get_lead_by_id(lead_id)
+    if lead is None:
+        raise HTTPException(status_code=404, detail=f"No lead with id {lead_id}.")
+    if not lead.get("assigned_to"):
+        raise HTTPException(status_code=409, detail="Lead has no assigned rep to nudge.")
+
+    rep = await db.get_user_by_id(lead["assigned_to"])
+    if rep is None or not rep.get("telegram_id") or rep["telegram_id"] < 0:
+        raise HTTPException(status_code=409, detail="Assigned rep has no linked Telegram account.")
+    if telegram_app is None or not telegram_app.running:
+        raise HTTPException(status_code=503, detail="Telegram bot is not running.")
+
+    company_names = await _company_names([lead])
+    try:
+        await _send_nudge(telegram_app.bot, lead, rep, company_names.get(lead.get("company_id")))
+    except Exception as e:
+        logger.exception(f"[nudge] manual nudge failed for lead {lead_id}")
+        raise HTTPException(status_code=502, detail=f"Telegram send failed: {e}")
+    return Response(status_code=204)
 
 
 # ─── Local dev entry point ─────────────────────────────────────

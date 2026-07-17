@@ -31,7 +31,7 @@ python eval/score_extraction.py --verbose               # + per-row pass/fail
 python eval/score_extraction.py --min-accuracy 0.8       # exit 1 if accuracy < 80%
 ```
 
-Requires `ANTHROPIC_API_KEY` in the environment — this makes real API calls (Haiku model, one
+Requires `OPENAI_API_KEY` in the environment — this makes real API calls (gpt-4o-mini, one
 call per dataset row, small but non-zero cost).
 
 ## Using it as a Ralph-loop stop condition

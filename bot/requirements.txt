@@ -1,6 +1,5 @@
-python-telegram-bot==21.*
-pyairtable
-anthropic
+python-telegram-bot[job-queue]==21.*
+asyncpg
 openai
 python-dotenv
 fastapi
