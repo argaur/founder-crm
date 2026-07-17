@@ -277,6 +277,23 @@
       overflow: hidden;
     }
     .panel { background: var(--surface); padding: 18px; }
+    .radar-row { padding: 8px 0; border-top: 1px solid var(--border); }
+    .radar-row:first-child { border-top: none; }
+    .radar-line1 { font-size: 0.8rem; color: var(--ink); }
+    .radar-co { font-weight: 700; }
+    .radar-line1 .muted { color: var(--text-2); font-weight: 400; }
+    .radar-typechip { display: inline-block; font-size: 0.6rem; padding: 1px 6px;
+      border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border-2);
+      color: var(--text-2); margin-left: 4px; }
+    .wx-chip { display: flex; align-items: center; gap: 6px; font-size: 0.72rem;
+      color: var(--text-2); margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .wx-chip svg { flex: none; }
+    .wx-cue { font-size: 0.68rem; color: var(--text-3); margin-top: 2px; }
+    .movein-chip { display: inline-block; font-size: 0.6rem; padding: 1px 6px;
+      border-radius: 5px; background: var(--surface-2); color: var(--text-2); margin-top: 4px; }
+    .radar-link { display: inline-block; margin-top: 5px; font-size: 0.68rem;
+      color: var(--ink); border-bottom: 1px solid var(--border-2); cursor: pointer; }
+    .radar-link:hover { border-color: var(--ink); }
     .funnel-row { display: grid; grid-template-columns: 110px 1fr auto;
       align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; }
     .funnel-row:hover .funnel-track { background: var(--border); }
@@ -2474,7 +2491,128 @@
       document.getElementById('home-heat').innerHTML = strip +
         (rows || '<div class="panel-empty">No active deals yet.</div>');
     }
-    function renderRadar(o) {}
+    // ── Site Visit Radar weather (Open-Meteo, client-side, keyless) ──
+    // Coords for the six seeded cities only; unknown city → no chip, no error.
+    const CITY_COORDS = {
+      Bangalore: [12.97, 77.59], Delhi: [28.61, 77.21], Gurgaon: [28.46, 77.03],
+      Hyderabad: [17.39, 78.49], Mumbai: [19.08, 72.88], Pune: [18.52, 73.86],
+    };
+    const WX_ICONS = {
+      sun:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>',
+      cloud:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18h11a4 4 0 0 0 .5-7.97A6 6 0 0 0 6 11a4 4 0 0 0 0 7Z"/></svg>',
+      rain: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 15h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6 8"/><path d="M8 19l-1 2M12 19l-1 2M16 19l-1 2"/></svg>',
+      haze: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round"><path d="M3 8h18M5 12h14M4 16h16"/></svg>',
+    };
+    function wmoIconKey(code) {
+      if (code == null) return 'cloud';
+      if (code === 0 || code === 1) return 'sun';
+      if (code === 45 || code === 48) return 'haze';
+      if (code >= 51) return 'rain';   // drizzle/rain/snow/thunder
+      return 'cloud';                  // 2, 3
+    }
+    function weekdayShort(iso) {
+      return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short' });
+    }
+    // Returns {} on any failure (chips simply won't render). 30-min sessionStorage cache.
+    async function fetchWeather(cities) {
+      const uniq = [...new Set(cities.filter(c => CITY_COORDS[c]))].sort();
+      if (!uniq.length) return {};
+      const cacheKey = 'siteline_wx_' + uniq.join(',');
+      try {
+        const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+        if (cached && Date.now() - cached.t < 30 * 60 * 1000) return cached.data;
+      } catch (e) { /* ignore corrupt cache */ }
+      const lats = uniq.map(c => CITY_COORDS[c][0]).join(',');
+      const lons = uniq.map(c => CITY_COORDS[c][1]).join(',');
+      const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lats +
+        '&longitude=' + lons +
+        '&daily=weather_code,temperature_2m_max,precipitation_probability_max' +
+        '&forecast_days=4&timezone=Asia%2FKolkata';
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('weather ' + res.status);
+        const json = await res.json();
+        const arr = Array.isArray(json) ? json : [json];  // multi- vs single-city
+        const data = {};
+        uniq.forEach((c, i) => { data[c] = (arr[i] && arr[i].daily) ? arr[i].daily : null; });
+        sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), data }));
+        return data;
+      } catch (e) {
+        console.warn('[weather] fetch failed — rendering radar without chips', e);
+        return {};
+      }
+    }
+    function weatherChipHTML(city, daily) {
+      if (!daily || !daily.temperature_2m_max) return '';
+      const temps = daily.temperature_2m_max;
+      const precip = daily.precipitation_probability_max || [];
+      const codes = daily.weather_code || [];
+      const dates = daily.time || [];
+      const todayTemp = Math.round(temps[0]);
+      const icon = WX_ICONS[wmoIconKey(codes[0])];
+      let line = `${esc(city)} · ${todayTemp}° today`;
+      // Wettest of the next 3 days (idx 1..3) for the warning half of the chip.
+      let warnIdx = -1, warnMax = -1;
+      for (let i = 1; i <= 3 && i < precip.length; i++) {
+        if (precip[i] > warnMax) { warnMax = precip[i]; warnIdx = i; }
+      }
+      if (warnIdx > 0 && warnMax >= 60) {
+        line += ` · Rain ${Math.round(warnMax)}% ${weekdayShort(dates[warnIdx])}`;
+      }
+      let cue = '';
+      if (warnMax >= 60) {                          // driest day across the forecast
+        let dryIdx = 0, dryMin = Infinity;
+        for (let i = 0; i < precip.length; i++) {
+          if (precip[i] < dryMin) { dryMin = precip[i]; dryIdx = i; }
+        }
+        cue = `<div class="wx-cue">${weekdayShort(dates[dryIdx])} is the dry window.</div>`;
+      }
+      return `<div class="wx-chip">${icon}<span>${line}</span></div>${cue}`;
+    }
+
+    function renderRadar(o) {
+      const visits = o.site_visits || [];
+      const el = document.getElementById('home-radar');
+      if (!visits.length) {
+        el.innerHTML = '<div class="panel-empty">No site visits scheduled.</div>';
+        return;
+      }
+      const now = Date.now();
+      // Render rows first (weather is enrichment, injected async into placeholders).
+      el.innerHTML = visits.map(l => {
+        const seats = l.seat_count != null ? `${l.seat_count} seats` : 'seats TBC';
+        const type = l.space_type ? `<span class="radar-typechip">${esc(l.space_type)}</span>` : '';
+        let movein = '';
+        if (l.move_in_date) {
+          const days = Math.round((new Date(l.move_in_date + 'T00:00:00').getTime() - now) / 86400000);
+          if (days >= 0 && days <= 21) {
+            const d = new Date(l.move_in_date + 'T00:00:00')
+              .toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+            movein = `<div class="movein-chip">Move-in ${esc(d)}</div>`;
+          }
+        }
+        const cityAttr = l.city ? esc(l.city) : '';
+        return `<div class="radar-row">
+          <div class="radar-line1" onclick="openContactDetail('${l.id}')" style="cursor:pointer">
+            <span class="radar-co">${esc(l.company || l.contact_name || '—')}</span>
+            <span class="muted"> · ${esc(l.contact_name || '')} · ${esc(seats)}</span>${type}
+          </div>
+          <div class="wx-slot" data-city="${cityAttr}"></div>
+          ${movein}
+          <span class="radar-link" onclick="showPage('home');document.getElementById('home-inventory').scrollIntoView({behavior:'smooth'})">Spaces in ${cityAttr || 'city'} &rarr;</span>
+        </div>`;
+      }).join('');
+
+      // Enrich with weather (best-effort). Failure leaves the rows as-is.
+      const cities = visits.map(l => l.city).filter(Boolean);
+      fetchWeather(cities).then(wx => {
+        el.querySelectorAll('.wx-slot').forEach(slot => {
+          const city = slot.getAttribute('data-city');
+          const daily = wx[city];
+          if (daily) slot.innerHTML = weatherChipHTML(city, daily);
+        });
+      });
+    }
     function renderInventory(o) {}
     function renderAttention(o) {}
     function renderActivity(o) {}
