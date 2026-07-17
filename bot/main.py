@@ -413,6 +413,11 @@ async def register(body: RegisterRequest):
     is linked, so the row gets a unique negative placeholder (real Telegram IDs
     are positive — no collision). Known demo seam: /start registers by real
     telegram_id, so the web row isn't merged with the Telegram identity yet.
+
+    role="manager" is deliberate for this path: self-signups here are reviewers
+    testing the product, not real reps with assigned leads — manager role gets
+    them straight to the seeded Team view (funnel/leaderboard/stalled leads)
+    instead of a personal pipeline with zero leads assigned to them.
     """
     placeholder_telegram_id = -(secrets.randbelow(2**62) + 1)
     user = await db.create_user(
@@ -420,6 +425,7 @@ async def register(body: RegisterRequest):
         first_name=body.first_name,
         email=body.email,
         company=body.company,
+        role="manager",
     )
     logger.info(f"Registered new user: {user['id']} ({body.email})")
 
