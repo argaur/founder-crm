@@ -462,3 +462,56 @@ def score_space_for_lead(lead: Dict[str, Any], space: Dict[str, Any]) -> Dict[st
         "score": int(round(budget_points + type_points + capacity_points)),
         "reasons": reasons,
     }
+
+
+async def get_matches_for_lead(lead: Dict[str, Any], limit: int = 3) -> Dict[str, Any]:
+    """Top-N space suggestions for a lead. One get_all_spaces(city) fetch,
+    then pure filtering/scoring/sorting in Python.
+
+    Returns {"status": str, "matches": List[dict], "largest_available": Optional[int]}:
+      ok                   — >=1 space passed hard filters; matches = top-N scored
+      not_enough_info      — lead missing city or positive seat_count (normal
+                             state for early leads, never an exception)
+      no_city_inventory    — zero spaces rows in the lead's city
+      undersized_inventory — city rows exist but every available_seats <
+                             seat_count; largest_available = max in that city
+
+    Hard filters (disqualify entirely): wrong city (enforced by the
+    case-insensitive SQL filter in get_all_spaces) and available_seats <
+    seat_count. Everything else only lowers rank — no minimum-score cutoff.
+    """
+    if not is_matchable(lead):
+        return {"status": "not_enough_info", "matches": [], "largest_available": None}
+
+    spaces = await get_all_spaces(lead["city"])
+    if not spaces:
+        return {"status": "no_city_inventory", "matches": [], "largest_available": None}
+
+    seat_count = int(lead["seat_count"])
+    fitting = [s for s in spaces if int(s["available_seats"]) >= seat_count]
+    if not fitting:
+        return {
+            "status": "undersized_inventory",
+            "matches": [],
+            "largest_available": max(int(s["available_seats"]) for s in spaces),
+        }
+
+    scored = []
+    for space in fitting:
+        match = dict(space)
+        # Plain floats so FastAPI/json emit numbers, mirroring what
+        # api_team_funnel does for est_deal_value.
+        if match.get("price_per_seat") is not None:
+            match["price_per_seat"] = float(match["price_per_seat"])
+        match.update(score_space_for_lead(lead, space))
+        scored.append(match)
+
+    # Sort: score desc, then price asc (nulls last), then higher capacity
+    # utilization (tighter fit), then id asc (stable, deterministic).
+    scored.sort(key=lambda m: (
+        -m["score"],
+        m["price_per_seat"] if m.get("price_per_seat") is not None else float("inf"),
+        -(seat_count / int(m["available_seats"])),
+        m["id"],
+    ))
+    return {"status": "ok", "matches": scored[:limit], "largest_available": None}
