@@ -216,6 +216,29 @@
       overflow: hidden;
     }
     .stat-card { background: var(--surface); padding: 16px 18px; }
+    .stat-grid-5 { grid-template-columns: repeat(5, 1fr); }
+    .home-header { margin-bottom: 20px; }
+    .home-eyebrow {
+      font-family: var(--sans); font-weight: 700; font-size: 0.675rem;
+      text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-3);
+    }
+    .home-greeting {
+      font-family: var(--sans); font-weight: 800; font-size: 1.5rem;
+      letter-spacing: -0.02em; color: var(--ink); margin-top: 4px;
+    }
+    .home-pulse {
+      font-family: var(--sans); font-weight: 400; font-size: 0.8125rem;
+      color: var(--text-2); margin-top: 6px; line-height: 1.55;
+    }
+    .home-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;
+    }
+    #home-data { display: flex; flex-direction: column; }
+    #home-stats { margin-top: 4px; }
+    @media (max-width: 860px) {
+      .stat-grid-5 { grid-template-columns: repeat(2, 1fr); }
+      .home-grid { grid-template-columns: 1fr; }
+    }
     .stat-lbl {
       font-family: var(--sans);
       font-size: 0.58rem;
@@ -1708,63 +1731,45 @@
               <div class="ws-body">AI extracts the deal and this dashboard updates automatically</div>
             </div>
           </div>
-          <div class="demo-box">
-            <div class="demo-lbl">
-              Example Pipeline
-              <span class="demo-lbl-badge">Demo data — yours will appear here</span>
-            </div>
-            <div class="demo-row">
-              <div><span class="demo-co">TechCorp Solutions</span><span class="demo-person">Arjun Mehta · CTO</span></div>
-              <div class="demo-badges"><span class="stage-chip">Negotiation</span><span class="badge bh">Hot</span></div>
-            </div>
-            <div class="demo-row">
-              <div><span class="demo-co">Razorpay</span><span class="demo-person">Priya Sharma · VP Partnerships</span></div>
-              <div class="demo-badges"><span class="stage-chip">Proposal</span><span class="badge bw">Warm</span></div>
-            </div>
-            <div class="demo-row">
-              <div><span class="demo-co">Groww</span><span class="demo-person">Ananya Kumar · Head of Ops</span></div>
-              <div class="demo-badges"><span class="stage-chip">Qualified</span><span class="badge bh">Hot</span></div>
-            </div>
-          </div>
         </div>
 
         <!-- Data state -->
         <div id="home-data" class="hidden">
-          <div class="stat-grid">
-            <div class="stat-card">
-              <div class="stat-lbl">Active Deals</div>
-              <div id="stat-active" class="stat-num">—</div>
+          <div id="home-header" class="home-header"></div>
+          <div id="home-stats" class="stat-grid stat-grid-5"></div>
+          <div class="home-grid">
+            <div class="panel">
+              <div class="panel-hd"><span class="panel-title">Pipeline</span></div>
+              <div id="home-funnel"></div>
             </div>
-            <div class="stat-card">
-              <div class="stat-lbl">Won This Month</div>
-              <div id="stat-won" class="stat-num g">—</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-lbl">Need Follow-up</div>
-              <div id="stat-followup" class="stat-num a">—</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-lbl">Avg Heat Score</div>
-              <div id="stat-heat" class="stat-num b">—</div>
+            <div class="panel">
+              <div class="panel-hd"><span class="panel-title">Heat &amp; Momentum</span></div>
+              <div id="home-heat"></div>
             </div>
           </div>
-          <div class="home-panels">
+          <div class="home-grid">
             <div class="panel">
-              <div class="panel-hd">
-                <span class="panel-title">Follow-up Queue</span>
-                <button onclick="showPage('followups')" class="panel-lnk">View all</button>
-              </div>
-              <div id="home-followup-list"></div>
-              <div id="home-followup-empty" class="hidden panel-empty">No overdue follow-ups. All caught up.</div>
+              <div class="panel-hd"><span class="panel-title">Site Visit Radar</span></div>
+              <div id="home-radar"></div>
             </div>
             <div class="panel">
-              <div class="panel-hd">
-                <span class="panel-title">Hottest Deals</span>
-                <button onclick="showPage('pipeline')" class="panel-lnk">View pipeline</button>
-              </div>
-              <div id="home-hot-list"></div>
-              <div id="home-hot-empty" class="hidden panel-empty">No active deals yet.</div>
+              <div class="panel-hd"><span class="panel-title">Inventory Pressure</span></div>
+              <div id="home-inventory"></div>
             </div>
+          </div>
+          <div class="home-grid">
+            <div class="panel">
+              <div class="panel-hd"><span class="panel-title">Needs a Human Today</span></div>
+              <div id="home-attention"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-hd"><span class="panel-title">Live Activity</span></div>
+              <div id="home-activity"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-hd"><span class="panel-title">City Footprint</span></div>
+            <div id="home-cities"></div>
           </div>
         </div>
       </div>
@@ -2069,6 +2074,7 @@
   <script>
     let allLeads     = [];   // flat array of API lead objects (Object.values(pipeline).flat())
     let pipelineData = {};    // {stageName: [lead, ...]} exactly as returned by GET /api/leads
+    let overviewData = null;   // parsed GET /api/overview payload (drives #page-home)
     let teamData     = null;  // last GET /api/team/funnel payload (managers only)
     let teamLoaded   = false; // becomes true after the first team-funnel fetch attempt
     let stalledExpanded = false; // stalled-list "show all" toggle state
@@ -2235,8 +2241,12 @@
       document.getElementById('followups-list').classList.add('hidden');
 
       try {
-        const data = await apiFetch('/api/leads');
-        if (!data) return;   // 401 → apiFetch already rendered the sign-in state
+        const [data, overview] = await Promise.all([
+          apiFetch('/api/leads'),
+          apiFetch('/api/overview'),
+        ]);
+        if (!data || !overview) return;   // 401 → apiFetch already rendered sign-in
+        overviewData = overview;
         pipelineData = data.pipeline || {};
         allLeads = Object.values(pipelineData).flat();
         if (data.user) currentUser = data.user;
@@ -2268,75 +2278,69 @@
     };
     function stageCls(s) { return stageClass[s] || 'stage-chip'; }
 
-    // ── Render Home ───────────────────────────────────────────────
+    // ── Render Home (overview-driven, vision §1) ──────────────────
+    // States:
+    //   full     — this scope has leads (or the user is a manager): render all panels
+    //   rep-empty— rep with zero own leads but the platform is alive: explainer
+    //              + real activity feed (wired in Task 9), never fake rows
+    //   cold     — zero leads AND zero platform activity: explainer + zeroed stats
     function renderHome() {
       document.getElementById('home-loading').style.display = 'none';
-      const active = allLeads.filter(l => ACTIVE_STAGES.includes(l.stage));
-      const now = new Date();
+      const dataEl  = document.getElementById('home-data');
+      const emptyEl = document.getElementById('home-empty');
+      const o = overviewData;
+      if (!o) return;
 
-      if (allLeads.length === 0) {
-        document.getElementById('home-empty').classList.remove('hidden');
+      const role       = (currentUser && currentUser.role) || 'rep';
+      const scopeHasLeads = o.totals.active_leads > 0 || o.totals.closed_won_count > 0;
+      const platformAlive = (o.activity || []).length > 0;
+
+      if (!scopeHasLeads && role !== 'manager') {
+        // rep-empty OR cold-start — both show the explainer.
+        dataEl.classList.add('hidden');
+        emptyEl.classList.remove('hidden');
+        // Task 9 replaces the deleted demo-box with the real activity feed here.
         return;
       }
-      document.getElementById('home-data').classList.remove('hidden');
 
-      const won = allLeads.filter(l => {
-        if (l.stage !== 'Closed-Won') return false;
-        const lu = l.last_activity_at;
-        if (!lu) return false;
-        const d = new Date(lu);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      });
-      const stale = getStale();
-      const heats = active.map(l => heatOf(l).score);
-      const avgHeat = heats.length ? Math.round(heats.reduce((a,b) => a+b,0) / heats.length) : 0;
+      emptyEl.classList.add('hidden');
+      dataEl.classList.remove('hidden');
 
-      document.getElementById('stat-active').textContent   = active.length;
-      document.getElementById('stat-won').textContent      = won.length;
-      document.getElementById('stat-followup').textContent = stale.length;
-      document.getElementById('stat-heat').textContent     = avgHeat;
+      // Per-panel renderers are added by Tasks 3–11. Each is null-safe on its
+      // slice of the payload, so partial builds render cleanly.
+      renderHomeHeader(o);      // Task 3
+      renderHomeStats(o);       // Task 3
+      renderFunnel(o);          // Task 4
+      renderHeatPanel(o);       // Task 5
+      renderRadar(o);           // Task 6
+      renderInventory(o);       // Task 7
+      renderAttention(o);       // Task 8
+      renderActivity(o);        // Task 9
+      renderCities(o);          // Task 10
+      applyRepLayout(role);     // Task 11
 
-      const fuList  = document.getElementById('home-followup-list');
-      const fuEmpty = document.getElementById('home-followup-empty');
-      if (stale.length === 0) {
-        fuList.innerHTML = ''; fuEmpty.classList.remove('hidden');
-      } else {
-        fuEmpty.classList.add('hidden');
-        fuList.innerHTML = stale.slice(0,5).map(l => {
-          const d = daysAgo(l.last_activity_at);
-          return `<div class="list-row" onclick="openContactDetail('${l.id}')">
-            <div><span class="list-name">${esc(l.contact_name||'—')}</span><span class="list-co">${esc(l.company||'')}</span></div>
-            <div class="list-right">
-              <span class="list-days">${d}d inactive</span>
-              <span class="${stageCls(l.stage)}">${esc(l.stage||'')}</span>
-            </div>
-          </div>`;
-        }).join('');
-      }
-
-      const hotList  = document.getElementById('home-hot-list');
-      const hotEmpty = document.getElementById('home-hot-empty');
-      const sorted   = [...active].sort((a,b) => heatOf(b).score - heatOf(a).score);
-      if (sorted.length === 0) {
-        hotList.innerHTML = ''; hotEmpty.classList.remove('hidden');
-      } else {
-        hotEmpty.classList.add('hidden');
-        hotList.innerHTML = sorted.slice(0,5).map(l => {
-          const h = heatOf(l);
-          return `<div class="list-row" onclick="openContactDetail('${l.id}')">
-            <div><span class="list-name">${esc(l.contact_name||'—')}</span><span class="list-co">${esc(l.company||'')}</span></div>
-            <div class="list-right">
-              <span class="${h.cls}">${h.label} · ${h.score}</span>
-              <span class="${stageCls(l.stage)}">${esc(l.stage||'')}</span>
-            </div>
-          </div>`;
-        }).join('');
-      }
-
+      // Nav follow-up badge (kept — sourced from the overview stalled count).
       const badge = document.getElementById('followup-badge');
-      if (stale.length > 0) { badge.textContent = stale.length; badge.classList.remove('hidden'); }
-      else badge.classList.add('hidden');
+      if (o.totals.stalled_count > 0) {
+        badge.textContent = o.totals.stalled_count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
     }
+
+    // Temporary stubs — each is replaced by its owning task (3–11). Delete the
+    // matching stub when you implement the real renderer.
+    function renderHomeHeader(o) {}
+    function renderHomeStats(o) {}
+    function renderFunnel(o) {}
+    function renderHeatPanel(o) {}
+    function renderRadar(o) {}
+    function renderInventory(o) {}
+    function renderAttention(o) {}
+    function renderActivity(o) {}
+    function renderCities(o) {}
+    function applyRepLayout(role) {}
 
     // ── Render Pipeline ───────────────────────────────────────────
     function renderPipeline() {
