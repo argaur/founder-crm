@@ -333,6 +333,15 @@
     .bw  { background: var(--border-2);  color: var(--text-2); }
     .bc  { background: var(--surface-2); color: var(--text-3); }
 
+    /* ── SIGNAL TAG (muted one-line synthesis, Feature C + match reasons) ── */
+    .signal-tag {
+      font-family: var(--sans);
+      font-size: 0.58rem;
+      color: var(--text-3);
+      margin-top: 3px;
+      line-height: 1.4;
+    }
+
     /* ── STAGE CHIPS (label-identified, one soft chip) ───── */
     .stage-chip {
       font-family: var(--sans);
@@ -1851,6 +1860,10 @@
           Back to Contacts
         </button>
         <div id="cd-header" class="cd-box"></div>
+        <div style="margin-bottom:18px">
+          <div class="int-lbl">Suggested Matches</div>
+          <div id="cd-matches"></div>
+        </div>
         <div>
           <div class="int-lbl">Interaction History</div>
           <div id="cd-interactions-loading">
@@ -2721,6 +2734,58 @@
       screenshot: 'Screenshot', addnote_command: 'Note'
     };
 
+    // Score → monochrome density badge, same scale as the heat badges.
+    function matchBadgeCls(score) {
+      return score >= 70 ? 'badge bh' : score >= 40 ? 'badge bw' : 'badge bc';
+    }
+
+    // Non-blocking, card-local: mirrors the interactions fetch pattern —
+    // a failure here never blocks the detail page.
+    async function loadMatches(lead) {
+      const el = document.getElementById('cd-matches');
+      el.innerHTML = '<div class="skeleton sk-row"></div>';
+      let data;
+      try {
+        data = await apiFetch(`/api/leads/${lead.id}/matches`);
+        if (!data) return;   // 401 → sign-in already rendered
+      } catch (err) {
+        el.innerHTML = '<div class="empty-sub">Couldn\'t load matches.</div>';
+        return;
+      }
+      if (data.status === 'not_enough_info') {
+        // Passive view — unlike the bot, the dashboard SHOULD say this.
+        el.innerHTML = '<div class="empty-sub">Add city and seat count to see suggested spaces.</div>';
+        return;
+      }
+      if (data.status === 'no_city_inventory') {
+        el.innerHTML = `<div class="empty-sub">No partner spaces in ${esc(lead.city)} yet.</div>`;
+        return;
+      }
+      if (data.status === 'undersized_inventory') {
+        el.innerHTML = `<div class="empty-sub">No single space fits ${esc(lead.seat_count)} seats — largest in ${esc(lead.city)} has ${esc(data.largest_available)}.</div>`;
+        return;
+      }
+      el.innerHTML = (data.matches || []).map(m => {
+        const priceBit = m.price_per_seat != null
+          ? `${formatINR(m.price_per_seat)}/seat${lead.budget_per_seat ? ' vs ' + formatINR(lead.budget_per_seat) + ' budget' : ''}`
+          : '';
+        const meta = [`${m.available_seats} seats free`, priceBit].filter(Boolean).map(esc).join(' · ');
+        const reason = (m.reasons && m.reasons[0])
+          ? `<div class="signal-tag">${esc(m.reasons[0])}</div>` : '';
+        return `<div class="list-row" style="cursor:default">
+          <div>
+            <span class="list-name">${esc(m.name)}</span><span class="list-co">${esc(m.locality || '')}</span>
+            <div class="c-meta">${meta}</div>
+            ${reason}
+          </div>
+          <div class="list-right">
+            <span class="stage-chip">${esc(m.space_type)}</span>
+            <span class="${matchBadgeCls(m.score)}">match ${m.score}</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
     async function openContactDetail(leadId) {
       const lead = allLeads.find(l => String(l.id) === String(leadId));
       if (!lead) return;
@@ -2759,6 +2824,8 @@
           <div class="cd-ival">${formatINR(lead.est_deal_value)} · ${specLine(lead)}</div>
         </div>
       `;
+
+      loadMatches(lead);   // fire-and-forget — loads in parallel with interactions
 
       const loadingEl = document.getElementById('cd-interactions-loading');
       const listEl    = document.getElementById('cd-interactions-list');
