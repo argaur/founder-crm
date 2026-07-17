@@ -543,6 +543,20 @@ async def api_lead_interactions(
     return await db.get_interactions(lead_id, limit=20)
 
 
+@app.get("/api/leads/{lead_id}/matches")
+async def api_lead_matches(
+    lead_id: int,
+    user: Dict[str, Any] = Depends(require_user),
+):
+    """Suggested spaces for a lead (Feature A). Read-only — never touches
+    available_seats. Auth semantics inherited from _load_lead_or_403: reps
+    see matches only for their own leads, managers for any. An unexpected DB
+    error surfaces as FastAPI's standard 500, same as every other endpoint."""
+    lead = await _load_lead_or_403(lead_id, user)
+    result = await db.get_matches_for_lead(lead)
+    return {"lead_id": lead_id, **result}
+
+
 @app.get("/api/team/funnel")
 async def api_team_funnel(user: Dict[str, Any] = Depends(require_manager)):
     """Manager-only team rollup. Shape matches DASHBOARD_MANAGER_VIEW_SPEC.md §5."""
