@@ -260,6 +260,11 @@
     .stat-num.g { color: #15803D; }
     .stat-num.a { color: var(--ink); }
     .stat-num.b { color: var(--ink); }
+    .stat-num.won-line { font-size: 0.7rem; font-weight: 700; color: #15803D;
+      margin-top: 2px; letter-spacing: 0; }
+    .stat-num.red { color: #B91C1C; }
+    .stat-sub { font-family: var(--sans); font-size: 0.62rem; color: var(--text-3);
+      margin-top: 3px; font-variant-numeric: tabular-nums; }
 
     /* ── HOME PANELS ─────────────────────── */
     .home-panels {
@@ -2329,10 +2334,53 @@
       }
     }
 
-    // Temporary stubs — each is replaced by its owning task (3–11). Delete the
-    // matching stub when you implement the real renderer.
-    function renderHomeHeader(o) {}
-    function renderHomeStats(o) {}
+    // Remaining temporary stubs — each is replaced by its owning task (4–11). Delete
+    // the matching stub when you implement the real renderer.
+    function renderHomeHeader(o) {
+      const el = document.getElementById('home-header');
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-IN',
+        { weekday: 'long', day: 'numeric', month: 'long' });
+      const hr = now.getHours();
+      const part = hr < 12 ? 'morning' : hr < 17 ? 'afternoon' : 'evening';
+      const name = (o.user && o.user.first_name) ? o.user.first_name : 'there';
+      const t = o.totals;
+      let pulse;
+      if (t.active_leads === 0) {
+        pulse = 'No active deals yet — forward a conversation to the bot to begin.';
+      } else if (t.stalled_count > 0) {
+        pulse = `${formatINR(t.pipeline_value)} in play across ${t.active_leads} active ` +
+          `deals. ${t.stalled_count} need attention.`;
+      } else {
+        pulse = `${formatINR(t.pipeline_value)} in play across ${t.active_leads} active ` +
+          `deals. Pipeline is moving.`;
+      }
+      el.innerHTML =
+        `<div class="home-eyebrow">${esc(dateStr)}</div>` +
+        `<div class="home-greeting">Good ${part}, ${esc(name)}.</div>` +
+        `<div class="home-pulse">${esc(pulse)}</div>`;
+    }
+    function renderHomeStats(o) {
+      const t = o.totals;
+      const stalledCls = t.stalled_count > 0 ? 'stat-num red' : 'stat-num';
+      const wonSub = t.closed_won_value > 0
+        ? `<div class="stat-num won-line">${formatINR(t.closed_won_value)}</div>` : '';
+      document.getElementById('home-stats').innerHTML =
+        card('Pipeline Value', formatINR(t.pipeline_value), 'stat-num') +
+        card('Active Deals', t.active_leads, 'stat-num') +
+        card('Won This Month', t.closed_won_count, 'stat-num g', wonSub) +
+        card('Stalled', t.stalled_count, stalledCls) +
+        card('Seats: Demand / Avail',
+             `${t.seats_demanded} / ${t.seats_available}`, 'stat-num');
+
+      function card(label, value, cls, extra) {
+        return `<div class="stat-card">
+          <div class="stat-lbl">${esc(label)}</div>
+          <div class="${cls}">${esc(String(value))}</div>
+          ${extra || ''}
+        </div>`;
+      }
+    }
     function renderFunnel(o) {}
     function renderHeatPanel(o) {}
     function renderRadar(o) {}
