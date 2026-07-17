@@ -180,12 +180,11 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
   `GET /api/leads/{id}/matches` + a dashboard "Suggested Matches" card on contact
   detail), dashboard-only lead signal tags across the pipeline/follow-ups/stalled views,
   and a `/dashboard` bot command sending returning users a fresh sign-in link.
-- **Current task:** Phase 9 — a full end-to-end demo-spine walkthrough with the bot
-  actually polling Telegram, plus running the eval, once the blocker below clears.
-- **Blocker:** `TELEGRAM_BOT_TOKEN` and `OPENAI_API_KEY` are still blank in `bot/.env`
-  (`DATABASE_URL` and `DASHBOARD_TOKEN_SECRET` are set) — deliberately deferred to the
-  end of the build per Gaurav's call on 2026-07-17. No browser automation was
-  available this session (Chrome extension not connected), so dashboard UI
-  verification was real API round-trips + careful static review, not rendered
-  screenshots — worth a manual click-through before the final demo.
+- **Current task:** `TELEGRAM_BOT_TOKEN`/`OPENAI_API_KEY` are filled in and rotated,
+  the bot is deployed live on Railway (project `founder-crm`, see `bot/CLAUDE.md`'s
+  Deploy target) and confirmed polling Telegram. Remaining: run the eval, then the
+  Phase 9 end-to-end demo-spine walkthrough, plus a manual browser click-through of
+  the space-matching/signal-tag features (no browser automation was available when
+  they were built — verified via real API round-trips + static review instead).
+- **Blocker:** none currently outstanding on secrets/deploy.
 - **Last updated:** 2026-07-17

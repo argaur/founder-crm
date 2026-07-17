@@ -157,11 +157,11 @@ Nixpacks, deployed via `railway up` from `bot/`. Confirmed by Gaurav 2026-07-17.
   scored in `db.py`'s `score_space_for_lead`), dashboard-only lead signal tags (e.g. "Stalled — no
   contact in N days", driven by `db.STALE_TAG_DAYS`, which now reads the same `NUDGE_STALE_DAYS` env var
   as `main.py`'s nudge job), and a `/dashboard` command for returning users to get a fresh sign-in link.
-- **Current task:** `eval/score_extraction.py` has been ported to the new coworking-domain dataset and
-  the new OpenAI extraction call, but has not been run yet — blocked on `OPENAI_API_KEY` being filled
-  into `.env` (deliberately deferred to the end of the build, alongside `TELEGRAM_BOT_TOKEN`, per
-  Gaurav's call). Remaining work: fill in both keys, run the eval, then a full end-to-end demo-spine
-  walkthrough with the bot actually polling Telegram.
-- **Blocker:** `TELEGRAM_BOT_TOKEN` and `OPENAI_API_KEY` still blank in `bot/.env` — the app runs fine
-  without them (API-only mode), but the bot itself, AI extraction, and the eval script all need them.
+- **Current task:** Both keys are filled in and rotated; the bot is deployed live on
+  Railway (see Deploy target above) and confirmed polling Telegram. `eval/score_extraction.py`
+  has been ported to the coworking-domain dataset and the new OpenAI extraction call but still
+  needs to actually run. Remaining: run the eval, then a full end-to-end demo-spine walkthrough
+  (including the space-matching bot follow-up message and the `/dashboard` command) with the bot
+  live, plus a manual browser click-through of the dashboard's new matching/signal-tag surfaces.
+- **Blocker:** none currently outstanding on secrets/deploy.
 - **Last updated:** 2026-07-17
