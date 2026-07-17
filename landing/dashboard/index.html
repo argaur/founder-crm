@@ -373,6 +373,27 @@
     .bw  { background: var(--border-2);  color: var(--text-2); }
     .bc  { background: var(--surface-2); color: var(--text-3); }
 
+    .heat-strip { display: flex; height: 12px; border-radius: 6px; overflow: hidden;
+      gap: 1px; margin: 4px 0 8px; }
+    .heat-seg { height: 12px; }
+    .heat-seg.hot  { background: var(--ink); }
+    .heat-seg.warm { background: var(--border-2); }
+    .heat-seg.cold { background: var(--surface-2); }
+    .heat-legend { display: flex; gap: 14px; font-size: 0.68rem; color: var(--text-2);
+      font-variant-numeric: tabular-nums; margin-bottom: 10px; }
+    .heat-legend .dot { display: inline-block; width: 6px; height: 6px; border-radius: 2px;
+      margin-right: 5px; vertical-align: middle; }
+    .heat-legend .muted { color: var(--text-3); }
+    .hot-row { display: grid; grid-template-columns: 1fr auto; gap: 8px;
+      align-items: start; padding: 7px 0; border-top: 1px solid var(--border); cursor: pointer; }
+    .hot-row:first-child { border-top: none; }
+    .hot-co { font-weight: 700; font-size: 0.8rem; color: var(--ink); }
+    .hot-meta { font-size: 0.68rem; color: var(--text-2); margin-top: 1px; }
+    .hot-signal { font-size: 0.62rem; color: var(--text-3); margin-top: 2px; }
+    .hot-right { text-align: right; white-space: nowrap; }
+    .hot-val { font-size: 0.72rem; font-weight: 600; color: var(--ink);
+      font-variant-numeric: tabular-nums; margin-top: 3px; }
+
     /* ── SIGNAL TAG (muted one-line synthesis, Feature C + match reasons) ── */
     .signal-tag {
       font-family: var(--sans);
@@ -2417,7 +2438,42 @@
         </div>`;
       }).join('');
     }
-    function renderHeatPanel(o) {}
+    function renderHeatPanel(o) {
+      const h = o.heat || { hot: 0, warm: 0, cold: 0 };
+      const total = Math.max(1, h.hot + h.warm + h.cold);
+      const seg = (n, cls) => n > 0
+        ? `<div class="heat-seg ${cls}" style="flex:${n}"></div>` : '';
+      const lbl = (n, cls, name) => `<span${n === 0 ? ' class="muted"' : ''}>` +
+        `<span class="dot" style="background:${cls}"></span>${name} ${n}</span>`;
+      const strip = `<div class="heat-strip">${seg(h.hot,'hot')}${seg(h.warm,'warm')}${seg(h.cold,'cold')}</div>` +
+        `<div class="heat-legend">` +
+        lbl(h.hot,  'var(--ink)',       'Hot')  +
+        lbl(h.warm, 'var(--border-2)',  'Warm') +
+        lbl(h.cold, 'var(--surface-2)', 'Cold') + `</div>`;
+
+      const hottest = o.hottest || [];
+      const rows = hottest.map(l => {
+        const hb = heatOf(l);   // maps l.heat_score.label → badge bh/bw/bc
+        // signal_tag pass-through; degrade to contact · seats · city if absent.
+        const fallback = [l.contact_name, l.seat_count != null ? `${l.seat_count} seats` : null, l.city]
+          .filter(Boolean).map(esc).join(' · ');
+        const second = l.signal_tag ? esc(l.signal_tag) : fallback;
+        return `<div class="hot-row" onclick="openContactDetail('${l.id}')">
+          <div>
+            <div class="hot-co">${esc(l.company || l.contact_name || '—')}</div>
+            <div class="hot-meta">${fallback}</div>
+            <div class="hot-signal">${second}</div>
+          </div>
+          <div class="hot-right">
+            <span class="${hb.cls}">${hb.label} · ${hb.score}</span>
+            <div class="hot-val">${formatINR(l.est_deal_value)}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      document.getElementById('home-heat').innerHTML = strip +
+        (rows || '<div class="panel-empty">No active deals yet.</div>');
+    }
     function renderRadar(o) {}
     function renderInventory(o) {}
     function renderAttention(o) {}
