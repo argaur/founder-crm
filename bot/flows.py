@@ -85,6 +85,60 @@ def _lead_details(lead: dict) -> str:
     return " · ".join(parts)
 
 
+def _format_matches_message(lead: dict, result: dict, company_name: str = ""):
+    """Builds the follow-up suggested-spaces message after a capture (Feature A).
+
+    Returns a MarkdownV2-escaped string ready for parse_mode="MarkdownV2",
+    or None when nothing should be sent (status == "not_enough_info": the
+    next capture may enrich the lead — nagging for city/seats here would
+    fight the evaluate_note_quality follow-up flow, which owns that job).
+    Plain numbered text, no inline buttons — actions are Feature B, not built.
+    """
+    status = result.get("status")
+    if status == "not_enough_info":
+        return None
+
+    if status == "no_city_inventory":
+        return md(f"No partner spaces in {lead.get('city')} in inventory yet.")
+
+    if status == "undersized_inventory":
+        return md(
+            f"No single space fits {lead.get('seat_count')} seats in "
+            f"{lead.get('city')} — largest available has "
+            f"{result.get('largest_available')}."
+        )
+
+    matches = result.get("matches") or []
+    if not matches:  # defensive — "ok" always carries >=1 match
+        return None
+
+    display_name = company_name or lead.get("contact_name") or "this lead"
+    lines = [
+        f"Suggested spaces for {display_name} "
+        f"({lead.get('seat_count')} seats, {lead.get('city')}):",
+        "",
+    ]
+    budget = float(lead["budget_per_seat"]) if lead.get("budget_per_seat") else None
+
+    for i, m in enumerate(matches[:2], start=1):  # top 2 — chat real estate
+        bits = [f"{m['available_seats']} seats free"]
+        price = m.get("price_per_seat")
+        if price is not None and budget:
+            if price <= budget:
+                bits.append(f"₹{price:,.0f}/seat vs ₹{budget:,.0f} budget")
+            else:
+                bits.append(
+                    f"₹{price:,.0f}/seat ({round((price / budget - 1) * 100)}% over budget)"
+                )
+        elif price is not None:
+            bits.append(f"₹{price:,.0f}/seat")
+        bits.append(f"match {m['score']}")
+        lines.append(f"{i}. {m['name']} — {m['space_type']}")
+        lines.append(f"   {' · '.join(bits)}")
+
+    return md("\n".join(lines))
+
+
 async def _not_registered(update: Update):
     await update.message.reply_text(
         "You're not registered yet\\. Send /start to set up your account\\.",
@@ -149,6 +203,8 @@ async def _save_capture(
             source=source,
         )
         lead_id = lead["id"]
+        # Fresh lead → matching inputs are fresh by definition.
+        matching_inputs_changed = True
     else:
         lead = matches[0]
         lead_id = lead["id"]
@@ -183,6 +239,13 @@ async def _save_capture(
             updates["move_in_date"] = str(move_in_date)
         if updates:
             await db.update_lead(lead_id, **updates)
+
+        # Anti-spam gate: only re-suggest when this capture actually filled in
+        # a matching input. Recapturing a vague note against a complete lead
+        # must NOT re-send the same match list.
+        matching_inputs_changed = any(
+            k in updates for k in ("city", "seat_count", "space_type", "budget_per_seat")
+        )
 
     # No next_action column in the new schema — carried in the interaction summary.
     ai_summary = f"{summary} Next action: {next_action}".strip() if next_action else summary
@@ -219,6 +282,18 @@ async def _save_capture(
     ]])
 
     await update.message.reply_text(card, reply_markup=keyboard, parse_mode="MarkdownV2")
+
+    if matching_inputs_changed:
+        try:
+            result = await db.get_matches_for_lead(updated)
+            text = _format_matches_message(updated, result, company_name)
+            if text:
+                await update.message.reply_text(text, parse_mode="MarkdownV2")
+        except Exception:
+            # Capture already succeeded and was confirmed — the match message
+            # is a bonus, the saved lead is the product. Log loudly (project
+            # rule: no silent except), never surface this to the rep.
+            logger.exception(f"[match] suggestion failed for lead {lead_id}")
 
 
 # ─── Forwarded text / plain text capture ─────────────────────
