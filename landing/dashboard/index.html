@@ -2398,6 +2398,7 @@
           <span class="deal-val">${formatINR(lead.est_deal_value)}</span>
           <span class="deal-specs">${specLine(lead)}</span>
         </div>
+        ${lead.signal_tag ? `<div class="signal-tag" style="margin-top:0;margin-bottom:7px">${esc(lead.signal_tag)}</div>` : ''}
         <div class="deal-foot">
           <span class="deal-time">${lu}</span>
           <span class="deal-notes">${lead.interaction_count||0} notes</span>
@@ -2488,6 +2489,7 @@
             <div>
               <div class="fu-name">${esc(l.contact_name||'—')}<span class="fu-at"> @ ${esc(l.company||'')}</span></div>
               <div class="fu-action">Stale in ${esc(l.stage||'pipeline')} — needs a nudge.</div>
+              ${l.signal_tag ? `<div class="signal-tag">${esc(l.signal_tag)}</div>` : ''}
             </div>
             <div class="fu-right">
               <span class="${stageCls(l.stage)}">${esc(l.stage||'')}</span>
@@ -2706,7 +2708,10 @@
             </div>
           </div>
           <div class="fu-row" style="margin-top:6px">
-            <div class="fu-action">${specParts}</div>
+            <div>
+              <div class="fu-action">${specParts}</div>
+              ${s.signal_tag ? `<div class="signal-tag">${esc(s.signal_tag)}</div>` : ''}
+            </div>
             <button class="note-btn" onclick="event.stopPropagation();openContactDetail('${s.lead_id}')">View</button>
           </div>
         </div>`;
