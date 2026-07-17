@@ -277,6 +277,18 @@
       overflow: hidden;
     }
     .panel { background: var(--surface); padding: 18px; }
+    .inv-row { padding: 7px 0; border-top: 1px solid var(--border); }
+    .inv-row:first-child { border-top: none; }
+    .inv-head { display: flex; justify-content: space-between; align-items: baseline; }
+    .inv-city { font-weight: 700; font-size: 0.78rem; color: var(--ink); }
+    .inv-seats { font-size: 0.7rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
+    .inv-seats .over { color: #B91C1C; font-weight: 700; }
+    .inv-track { position: relative; height: 12px; border-radius: 6px;
+      background: var(--surface-2); overflow: hidden; margin: 5px 0 3px; }
+    .inv-fill { position: absolute; inset: 0 auto 0 0; height: 12px; background: var(--ink);
+      border-radius: 6px; }
+    .inv-tick { position: absolute; top: 0; width: 2px; height: 12px; background: var(--ink); }
+    .inv-sub { font-size: 0.66rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
     .radar-row { padding: 8px 0; border-top: 1px solid var(--border); }
     .radar-row:first-child { border-top: none; }
     .radar-line1 { font-size: 0.8rem; color: var(--ink); }
@@ -2613,7 +2625,37 @@
         });
       });
     }
-    function renderInventory(o) {}
+    function renderInventory(o) {
+      const rows = o.inventory || [];
+      const el = document.getElementById('home-inventory');
+      if (!rows.length) {
+        el.innerHTML = '<div class="panel-empty">No inventory loaded.</div>';
+        return;
+      }
+      el.innerHTML = rows.map(r => {
+        const total = Math.max(1, r.total_seats);
+        const occupied = Math.max(0, r.total_seats - r.available_seats);
+        const occPct = Math.min(100, Math.round((occupied / total) * 100));
+        // Where occupancy lands if the current pipeline closes.
+        const projected = occupied + (r.demand_seats || 0);
+        const tickPct = Math.min(100, Math.round((projected / total) * 100));
+        const over = projected - total;
+        const overTxt = over > 0 ? ` <span class="over">+${over} over</span>` : '';
+        const price = r.min_price_per_seat != null
+          ? ` · from ${formatINR(r.min_price_per_seat)}/seat` : '';
+        return `<div class="inv-row">
+          <div class="inv-head">
+            <span class="inv-city">${esc(r.city)}</span>
+            <span class="inv-seats">${occupied}/${r.total_seats} seats${overTxt}</span>
+          </div>
+          <div class="inv-track">
+            <div class="inv-fill" style="width:${occPct}%"></div>
+            <div class="inv-tick" style="left:calc(${tickPct}% - 1px)"></div>
+          </div>
+          <div class="inv-sub">${r.space_count} space${r.space_count === 1 ? '' : 's'}${price}</div>
+        </div>`;
+      }).join('');
+    }
     function renderAttention(o) {}
     function renderActivity(o) {}
     function renderCities(o) {}
