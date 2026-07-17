@@ -1,3 +1,7 @@
+import base64
+import hashlib
+import hmac
+import json
 import os
 import math
 from datetime import datetime, timezone
@@ -59,6 +63,39 @@ def _get_pool() -> asyncpg.Pool:
 def _validate_stage(stage: str) -> None:
     if stage not in STAGES:
         raise ValueError(f"Invalid stage: {stage!r} (valid: {', '.join(STAGES)})")
+
+
+# ─── Signed dashboard tokens (stdlib HMAC, no new dependency) ──
+# Deliberate 1-day-demo simplification: a signed, non-expiring token embedded
+# in each user's dashboard link, verified per-request. Not OAuth, no
+# revocation, no expiry. Lives here (not main.py) so commands.py can mint
+# tokens too, without a circular import.
+
+def _signing_key() -> bytes:
+    return os.environ["DASHBOARD_TOKEN_SECRET"].encode()
+
+
+def make_dashboard_token(user_id: int, role: str) -> str:
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"uid": int(user_id), "role": role}, separators=(",", ":")).encode()
+    ).rstrip(b"=")
+    signature = hmac.new(_signing_key(), payload, hashlib.sha256).hexdigest()
+    return f"{payload.decode()}.{signature}"
+
+
+def verify_dashboard_token(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        payload_b64, signature = token.split(".", 1)
+        expected = hmac.new(_signing_key(), payload_b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return None
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        if not isinstance(payload.get("uid"), int):
+            return None
+        return payload
+    except Exception:
+        return None
 
 
 # --- HEAT SCORE ---

@@ -14,10 +14,6 @@ Railway Procfile:
   (Note: when Railway runs uvicorn main:app, the lifespan handler starts the bot.)
 """
 
-import base64
-import hashlib
-import hmac
-import json
 import logging
 import os
 import secrets
@@ -68,38 +64,6 @@ ACTIVE_STAGES = [s for s in db.STAGES if s not in db.CLOSED_STAGES]
 VALID_NOTE_SOURCES = {"whatsapp_forward", "voice_note", "screenshot", "addnote_command"}
 
 
-# ─── Signed dashboard tokens (stdlib HMAC, no new dependency) ──
-# Deliberate 1-day-demo simplification (per IMPLEMENTATION_PLAN Phase 5):
-# a signed, non-expiring token embedded in each user's dashboard link,
-# verified per-request. Not OAuth, no revocation, no expiry.
-
-def _signing_key() -> bytes:
-    return os.environ["DASHBOARD_TOKEN_SECRET"].encode()
-
-
-def make_dashboard_token(user_id: int, role: str) -> str:
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"uid": int(user_id), "role": role}, separators=(",", ":")).encode()
-    ).rstrip(b"=")
-    signature = hmac.new(_signing_key(), payload, hashlib.sha256).hexdigest()
-    return f"{payload.decode()}.{signature}"
-
-
-def verify_dashboard_token(token: str) -> Optional[Dict[str, Any]]:
-    try:
-        payload_b64, signature = token.split(".", 1)
-        expected = hmac.new(_signing_key(), payload_b64.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            return None
-        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded))
-        if not isinstance(payload.get("uid"), int):
-            return None
-        return payload
-    except Exception:
-        return None
-
-
 async def require_user(request: Request) -> Dict[str, Any]:
     """Auth dependency: Bearer header preferred, ?token= fallback (link-embedded)."""
     auth_header = request.headers.get("Authorization", "")
@@ -109,7 +73,7 @@ async def require_user(request: Request) -> Dict[str, Any]:
     if not token:
         raise HTTPException(status_code=401, detail="Missing dashboard token.")
 
-    payload = verify_dashboard_token(token)
+    payload = db.verify_dashboard_token(token)
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid dashboard token.")
 
@@ -432,7 +396,7 @@ async def register(body: RegisterRequest):
     return RegisterResponse(
         user_id=str(user["id"]),
         deep_link=f"https://t.me/{BOT_NAME}?start={user['id']}",
-        dashboard_token=make_dashboard_token(user["id"], user["role"]),
+        dashboard_token=db.make_dashboard_token(user["id"], user["role"]),
     )
 
 
@@ -457,7 +421,7 @@ async def dashboard_link(body: DashboardLinkRequest):
         "user_id": user["id"],
         "first_name": user["first_name"],
         "role": user["role"],
-        "token": make_dashboard_token(user["id"], user["role"]),
+        "token": db.make_dashboard_token(user["id"], user["role"]),
     }
 
 
