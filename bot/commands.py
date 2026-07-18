@@ -16,7 +16,7 @@ import ai
 
 logger = logging.getLogger(__name__)
 
-DASHBOARD_BASE_URL = "https://argaur.github.io/founder-crm/dashboard/"
+DASHBOARD_BASE_URL = "https://argaur.github.io/siteline-crm/dashboard/"
 
 # ─── ConversationHandler states for /addcontact ───────────────
 ADD_NAME, ADD_COMPANY, ADD_STAGE, ADD_SOURCE = range(4)

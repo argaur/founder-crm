@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "")
-BOT_NAME = os.getenv("BOT_NAME", "")  # e.g. "foundercrm_bot" (without @)
+BOT_NAME = os.getenv("BOT_NAME", "")  # e.g. "SitelineCRMbot" (without @)
 
 # Nudge job tuning. For a live demo test, shrink via env before starting:
 #   NUDGE_INTERVAL_SECONDS=30 NUDGE_FIRST_DELAY_SECONDS=5 NUDGE_RENOTIFY_HOURS=0

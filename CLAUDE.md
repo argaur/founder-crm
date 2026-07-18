@@ -158,7 +158,7 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
 
 ## Deployment
 - `bot/` → Railway (`Procfile`, `railway.json`), FastAPI served via `uvicorn main:app`
-- `landing/` → GitHub Pages (https://argaur.github.io/founder-crm/)
+- `landing/` → GitHub Pages (https://argaur.github.io/siteline-crm/)
 
 ## Status
 - **State:** Phases 0-7 built and live-verified on branch `stylework-migration`.

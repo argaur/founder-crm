@@ -1,4 +1,4 @@
-# DESIGN_BRIEF.md — Siteline visual language (single source of truth)
+# DESIGN_BRIEF.md — SitelineCRM visual language (single source of truth)
 
 **Supersedes the dark-amber system entirely (2026-07-16).** The previous brief
 (dark `#080706` ground, amber `#E8920A` accent, Cormorant/DM Mono/Outfit
@@ -16,10 +16,12 @@ implementation) and `landing/dashboard/index.html` (next phase — restyle to
 match this brief). Any new page, section, or component draws from here. If a
 value here conflicts with code, fix the code.
 
-**Product name:** Siteline (wordmark: `SITELINE`, Manrope 800,
-letter-spacing 0.14em). The name reads two ways on purpose: *site visits*
-(the coworking sales step) and *sightline* (the manager's view of the
-pipeline).
+**Product name:** SitelineCRM (wordmark: `SITELINECRM`, Manrope 800,
+letter-spacing 0.14em). The "Siteline" root reads two ways on purpose: *site
+visits* (the coworking sales step) and *sightline* (the manager's view of the
+pipeline). Renamed from "Siteline" on 2026-07-18 so the product name, the
+Telegram handle (`@SitelineCRMbot`), and the repo (`argaur/siteline-crm`) all
+carry one string.
 
 **Positioning line:** "Coworking lead management that runs itself."
 

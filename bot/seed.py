@@ -1,5 +1,5 @@
 """
-seed.py — Demo data for the Siteline (Stylework B2B Sales CRM) case study.
+seed.py — Demo data for the SitelineCRM (Stylework B2B Sales CRM) case study.
 
 Seeds 1 manager + 2 reps and ~13 leads spread across every stage, several
 cities, and a mix of small (dedicated-desk) to large (managed-office) deal
@@ -231,7 +231,7 @@ LEADS = [
 
 
 async def seed():
-    print("Seeding Siteline demo data...\n")
+    print("Seeding SitelineCRM demo data...\n")
     await db.init_pool()
 
     manager = await db.create_user(**MANAGER)
@@ -296,7 +296,7 @@ async def seed():
 
 
 async def clear():
-    print("Clearing Siteline demo data...\n")
+    print("Clearing SitelineCRM demo data...\n")
     await db.init_pool()
     pool = db._get_pool()
 
@@ -331,7 +331,7 @@ async def clear():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Siteline demo data seeder")
+    parser = argparse.ArgumentParser(description="SitelineCRM demo data seeder")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--seed", action="store_true", help="Insert demo data")
     group.add_argument("--clear", action="store_true", help="Delete all demo data")

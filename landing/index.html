@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Siteline — Coworking lead management that runs itself</title>
-  <meta name="description" content="Forward a WhatsApp message and Siteline stages the lead — seats, city, budget, move-in extracted by AI. Stale leads nudge the rep automatically. Managers see the whole team's pipeline live." />
+  <title>SitelineCRM — Coworking lead management that runs itself</title>
+  <meta name="description" content="Forward a WhatsApp message and SitelineCRM stages the lead — seats, city, budget, move-in extracted by AI. Stale leads nudge the rep automatically. Managers see the whole team's pipeline live." />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -902,7 +902,7 @@
 
 <!-- ── NAV ──────────────────────────────────────────────── -->
 <nav>
-  <a href="#" class="nav-logo">SITELINE</a>
+  <a href="#" class="nav-logo">SITELINECRM</a>
   <div class="nav-right">
     <a href="#how-it-works" class="nav-link">How it works</a>
     <button class="btn-primary" onclick="openModal()">GET THE BOT →</button>
@@ -941,7 +941,7 @@
             <div class="pv-dot" style="background:var(--border-2)"></div>
             <div class="pv-dot" style="background:var(--border-2)"></div>
           </div>
-          <div class="pv-url">telegram → siteline_bot</div>
+          <div class="pv-url">telegram → SitelineCRMbot</div>
         </div>
         <div class="pv-chat">
           <div class="chat-lbl">Forwarded from WhatsApp</div>
@@ -1007,7 +1007,7 @@
             </div>
             <div class="compare-col-head">
               <span class="ch-dot" style="background:var(--ink)"></span>
-              <span class="ch-label" style="color:var(--ink)">Siteline</span>
+              <span class="ch-label" style="color:var(--ink)">SitelineCRM</span>
             </div>
           </div>
           <div class="compare-row">
@@ -1126,11 +1126,11 @@
           <div class="db-dot" style="background:var(--border-2)"></div>
           <div class="db-dot" style="background:var(--border-2)"></div>
         </div>
-        <div class="db-url">siteline.app/team</div>
+        <div class="db-url">sitelinecrm.app/team</div>
       </div>
       <div class="db-body">
         <div class="db-sidebar">
-          <div class="db-slbl">Siteline</div>
+          <div class="db-slbl">SitelineCRM</div>
           <div class="db-nav active">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             Dashboard
@@ -1273,11 +1273,11 @@
 <!-- ── FOOTER ────────────────────────────────────────────── -->
 <footer>
   <div class="foot-brand">
-    <strong>SITELINE</strong> · Coworking lead management that runs itself
+    <strong>SITELINECRM</strong> · Coworking lead management that runs itself
   </div>
   <div class="foot-links">
     <a href="dashboard/" class="foot-link">Dashboard</a>
-    <a href="https://t.me/RethinkCRMbot" target="_blank" rel="noopener noreferrer" class="foot-link">Open the bot</a>
+    <a href="https://t.me/SitelineCRMbot" target="_blank" rel="noopener noreferrer" class="foot-link">Open the bot</a>
     <a href="privacy.html" class="foot-link">Privacy</a>
   </div>
 </footer>
@@ -1286,7 +1286,7 @@
 <div id="signup-modal" onclick="handleModalBg(event)">
   <div class="modal-box">
     <button class="modal-close" onclick="closeModal()">×</button>
-    <h3 class="modal-title">Get started with Siteline</h3>
+    <h3 class="modal-title">Get started with SitelineCRM</h3>
     <p class="modal-sub">Your team's Telegram bot link — in seconds.</p>
     <form id="signup-form" novalidate>
       <input type="text"  id="field-name"    class="modal-field" placeholder="First Name" required />
@@ -1369,7 +1369,7 @@
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
       form.style.display = 'none';
-      dashLink.href = `https://argaur.github.io/founder-crm/dashboard/?uid=${data.user_id}`;
+      dashLink.href = `https://argaur.github.io/siteline-crm/dashboard/?uid=${data.user_id}`;
       successDiv.style.display = 'block';
     } catch {
       errorDiv.textContent = 'Something went wrong. Please try again.';

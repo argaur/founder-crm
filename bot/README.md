@@ -1,4 +1,4 @@
-# Siteline — Coworking Lead Management That Runs Itself
+# SitelineCRM — Coworking Lead Management That Runs Itself
 
 > A Telegram bot + manager dashboard that turns forwarded WhatsApp conversations into a live coworking sales pipeline — built for Stylework's B2B Sales vertical (50-seat teams to 10,000-seat managed offices).
 
@@ -37,7 +37,7 @@ Started as a single-user Airtable prototype (`founder-crm-bot` + `founder-crm-la
 
 ## Links
 
-- **Landing page:** https://argaur.github.io/founder-crm/
+- **Landing page:** https://argaur.github.io/siteline-crm/
 - **Portfolio:** https://gauravg-portfolio.vercel.app
 
 ---

@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python -m http.server 8080    # then open http://localhost:8080
 
 # Deploy: push to GitHub — auto-deploys to GitHub Pages
-# Live URL: https://argaur.github.io/founder-crm/
+# Live URL: https://argaur.github.io/siteline-crm/
 ```
 
 ## Architecture
