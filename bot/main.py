@@ -114,11 +114,17 @@ async def _read_scope(user: Dict[str, Any]):
     The pipeline is returned alongside the scope because resolving the scope
     requires fetching it; callers reuse this instead of querying again.
     """
-    if user.get("role") == "manager":
-        return None, False, await db.get_all_leads(assigned_to=None)
-
     own = await db.get_all_leads(assigned_to=user["id"])
-    if DEMO_MODE and not any(own.values()):
+    owns_nothing = not any(own.values())
+
+    if user.get("role") == "manager":
+        # Managers always read platform-wide — that is their job, not a
+        # fallback. But a manager who owns no leads (every account minted by
+        # /register) is still looking at seeded data, so it must be labelled:
+        # demo_mode keys off ownership, not role.
+        return None, DEMO_MODE and owns_nothing, await db.get_all_leads(assigned_to=None)
+
+    if DEMO_MODE and owns_nothing:
         return None, True, await db.get_all_leads(assigned_to=None)
     return user["id"], False, own
 
