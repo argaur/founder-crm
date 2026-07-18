@@ -84,9 +84,17 @@ via `python seed.py --seed` so the pipeline/manager views have real data to rend
   live-verified. Both live-verified via real `curl`/API round-trips against Neon this session; no browser
   automation was available to confirm the rendered pixels, so a manual click-through is still worth doing
   before the final demo.
-- **Current task:** none pending on this surface — next relevant step is the Phase 9 end-to-end
-  walkthrough once `bot/.env`'s remaining API keys are filled in.
-- **Blocker:** none directly (this surface doesn't need the missing API keys) — but a real demo walk-
-  through needs the bot running with `TELEGRAM_BOT_TOKEN` set, since the `bot` page's deep link and the
-  signup→Telegram handoff only make sense with a real bot.
-- **Last updated:** 2026-07-17
+- **Demo mode (added 2026-07-18, commit `2bdeec3`):** when the API reports `demo_mode` (the account
+  owns no leads and is reading the seeded pipeline), `#demo-banner` labels the data as sample. The
+  banner sits **outside the page containers** so Pipeline/Contacts/Follow-ups are labelled too, not
+  just Home. "Clear sample data" is a per-browser `localStorage` preference (`siteline.demoCleared`),
+  deliberately **not** a server-side delete — the rows belong to other accounts and the API refuses
+  demo writes; an incognito window resets it. Clearing is honoured in `loadData()`, the single point
+  leads enter the app, so all four views empty together. `renderHomeEmpty()` is the shared explainer
+  state for the rep-empty, cold-start and cleared paths.
+- **Current task:** none pending on this surface. The demo-mode frontend is **live on Pages**, but
+  stays inert until the matching backend build + `DEMO_MODE=true` land on Railway.
+- **Blocker:** none on this surface. Still never visually verified in a browser — the demo banner,
+  the clear flow, and the matching/signal-tag surfaces are confirmed by API contract and static
+  review only, so a click-through is still worth doing before the final demo.
+- **Last updated:** 2026-07-18

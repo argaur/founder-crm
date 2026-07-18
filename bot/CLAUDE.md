@@ -159,9 +159,23 @@ Nixpacks, deployed via `railway up` from `bot/`. Confirmed by Gaurav 2026-07-17.
   as `main.py`'s nudge job), and a `/dashboard` command for returning users to get a fresh sign-in link.
 - **Current task:** Both keys are filled in and rotated; the bot is deployed live on
   Railway (see Deploy target above) and confirmed polling Telegram. `eval/score_extraction.py`
-  has been ported to the coworking-domain dataset and the new OpenAI extraction call but still
-  needs to actually run. Remaining: run the eval, then a full end-to-end demo-spine walkthrough
-  (including the space-matching bot follow-up message and the `/dashboard` command) with the bot
-  live, plus a manual browser click-through of the dashboard's new matching/signal-tag surfaces.
-- **Blocker:** none currently outstanding on secrets/deploy.
-- **Last updated:** 2026-07-17
+  ran 2026-07-18: **93.5% (129/138)**, above the 0.8 gate — all 9 misses are `stage`
+  defaulting to `Inquiry` rather than `Qualified`/`unknown` (prompt-tuning item in `ai.py`,
+  not a regression). Remaining: a full end-to-end demo-spine walkthrough (including the
+  space-matching bot follow-up and the `/dashboard` command), plus a browser click-through
+  of the dashboard's matching/signal-tag surfaces.
+- **Demo mode (`DEMO_MODE`, default off):** added 2026-07-18 (commit `2bdeec3`). A rep who
+  owns no leads reads the platform-wide pipeline so the dashboard demonstrates itself to a
+  first-time visitor. `_read_scope()` is the single resolver, used by `/api/overview` and
+  `/api/leads`; both emit `demo_mode` in the payload. The scope widening is **read-only** —
+  `_load_lead_or_403(..., write=False)` marks the only two endpoints (`/interactions`,
+  `/matches`) allowed to serve a seeded lead to a demo visitor, and every mutation still
+  requires true ownership because the demo DB is shared. Verified both directions against
+  Neon; see `docs/superpowers/specs/2026-07-18-demo-mode-design.md`.
+- **Nudge 204 path:** still unverified, and untestable against seeded data by design — the
+  endpoint 409s on any rep with a negative `telegram_id` (all seeded reps) before calling
+  Telegram. Needs a lead temporarily assigned to a real positive `telegram_id` (user 14).
+- **Blocker:** the demo-mode build and `DEMO_MODE=true` are **not yet deployed** — Railway
+  commands are blocked for Claude by the permission classifier and must be run by Gaurav.
+  Until then the live API omits `demo_mode` and behaviour is identical to before.
+- **Last updated:** 2026-07-18

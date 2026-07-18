@@ -180,11 +180,24 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
   `GET /api/leads/{id}/matches` + a dashboard "Suggested Matches" card on contact
   detail), dashboard-only lead signal tags across the pipeline/follow-ups/stalled views,
   and a `/dashboard` bot command sending returning users a fresh sign-in link.
-- **Current task:** `TELEGRAM_BOT_TOKEN`/`OPENAI_API_KEY` are filled in and rotated,
-  the bot is deployed live on Railway (project `founder-crm`, see `bot/CLAUDE.md`'s
-  Deploy target) and confirmed polling Telegram. Remaining: run the eval, then the
-  Phase 9 end-to-end demo-spine walkthrough, plus a manual browser click-through of
-  the space-matching/signal-tag features (no browser automation was available when
-  they were built — verified via real API round-trips + static review instead).
-- **Blocker:** none currently outstanding on secrets/deploy.
-- **Last updated:** 2026-07-17
+  A **demo mode** then shipped (2026-07-18, commit `2bdeec3`): under the `DEMO_MODE`
+  env flag a visitor who owns no leads reads the seeded platform-wide pipeline
+  instead of an empty dashboard, labelled by a sample-data banner and clearable via
+  a per-browser preference. Reads only — cross-user writes stay 403 in both modes.
+  See `docs/superpowers/specs/2026-07-18-demo-mode-design.md`.
+- **Current task:** demo-mode frontend is live on Pages; the **backend build and
+  `DEMO_MODE=true` are not yet on Railway** — until both land the feature is inert
+  (API omits `demo_mode`, so behaviour is identical to before). Remaining after
+  that: Phase 9 end-to-end demo-spine walkthrough, and a browser click-through of
+  the demo banner/clear flow plus the space-matching/signal-tag surfaces (still
+  never visually verified — no browser automation has been available for them).
+- **Extraction eval:** run 2026-07-18 — **93.5% (129/138)**, above the 0.8 gate.
+  All 9 misses are `stage` defaulting to `Inquiry` instead of `Qualified`/`unknown`;
+  a prompt-tuning item in `ai.py`, not a regression.
+- **Nudge 204 path:** untestable against seeded data by design — `main.py` rejects
+  reps with negative `telegram_id` (all seeded reps) with a 409 before calling
+  Telegram. Testing it needs a lead temporarily assigned to a real positive
+  `telegram_id` (user 14).
+- **Blocker:** Railway deploy + `DEMO_MODE=true` must be run by Gaurav — both
+  commands are blocked for Claude by the permission classifier.
+- **Last updated:** 2026-07-18
