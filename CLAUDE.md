@@ -64,7 +64,7 @@ full detail on each surface — this file only covers what's shared/cross-cuttin
 main.py      — FastAPI lifespan wires everything: bot polling (if TELEGRAM_BOT_TOKEN
                set — else API-only mode) + nudge JobQueue on startup, /api/* endpoints
 db.py        — asyncpg queries against Neon Postgres (ASYNC — always await these calls)
-ai.py        — AsyncAnthropic (Claude Haiku) + OpenAI Whisper (ASYNC — always await)
+ai.py        — AsyncOpenAI (gpt-4o-mini + Whisper) (ASYNC — always await)
 commands.py  — All slash command handlers (/pipeline, /context, /won, /lost, /ask, /addcontact)
 flows.py     — All message capture handlers (forwarded text, voice, image, /addnote, /note)
 ```
@@ -81,7 +81,7 @@ assets/          — Static assets
 ## Critical Constraints
 
 **Async everywhere:** `bot/db.py` and `bot/ai.py` are fully async — `asyncpg` and
-`AsyncAnthropic` both support it natively. Every `db.*`/`ai.*` call must be `await`ed.
+`AsyncOpenAI` both support it natively. Every `db.*`/`ai.*` call must be `await`ed.
 (This inverts an earlier sync-Airtable-era constraint — see `bot/CLAUDE.md` if you
 find stale references to "never await" anywhere.)
 
@@ -121,7 +121,7 @@ Voice note → `voice_handler` → Whisper transcription → `ai.classify_intent
 if "recall": generate brief; if "capture": `ai.extract_from_voice()` →
 `_save_capture()` (no quality gate for voice)
 
-Image/screenshot → `image_handler` → `ai.extract_from_image()` (Claude Vision) →
+Image/screenshot → `image_handler` → `ai.extract_from_image()` (gpt-4o-mini vision) →
 `_save_capture()`
 
 `_save_capture()` in `flows.py` is the shared write path: find-or-create company +
@@ -185,12 +185,14 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
   instead of an empty dashboard, labelled by a sample-data banner and clearable via
   a per-browser preference. Reads only — cross-user writes stay 403 in both modes.
   See `docs/superpowers/specs/2026-07-18-demo-mode-design.md`.
-- **Current task:** demo-mode frontend is live on Pages; the **backend build and
-  `DEMO_MODE=true` are not yet on Railway** — until both land the feature is inert
-  (API omits `demo_mode`, so behaviour is identical to before). Remaining after
-  that: Phase 9 end-to-end demo-spine walkthrough, and a browser click-through of
-  the demo banner/clear flow plus the space-matching/signal-tag surfaces (still
-  never visually verified — no browser automation has been available for them).
+  Demo mode is **fully deployed and verified in production** (2026-07-18):
+  `DEMO_MODE=true` on Railway, build `1568cd3` live. A later fix made `demo_mode`
+  key off lead *ownership* rather than role — `/register` mints every new account
+  as a `manager`, and managers were bypassing the banner entirely, so a reviewer
+  signing up saw seeded data with no label at all.
+- **Current task:** Phase 9 end-to-end demo-spine walkthrough (never run on the
+  live bot), and a browser click-through of the demo banner/clear flow plus the
+  space-matching/signal-tag surfaces (still never visually verified).
 - **Extraction eval:** run 2026-07-18 — **93.5% (129/138)**, above the 0.8 gate.
   All 9 misses are `stage` defaulting to `Inquiry` instead of `Qualified`/`unknown`;
   a prompt-tuning item in `ai.py`, not a regression.
@@ -198,6 +200,8 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
   reps with negative `telegram_id` (all seeded reps) with a 409 before calling
   Telegram. Testing it needs a lead temporarily assigned to a real positive
   `telegram_id` (user 14).
-- **Blocker:** Railway deploy + `DEMO_MODE=true` must be run by Gaurav — both
-  commands are blocked for Claude by the permission classifier.
+- **Blocker:** none on deploy. Railway commands are blocked for Claude by the
+  permission classifier, so any future `railway up` must be run by Gaurav.
+  Note `railway up` uploads the *working directory*, not the pushed commit —
+  deploy after committing, or an older build ships.
 - **Last updated:** 2026-07-18

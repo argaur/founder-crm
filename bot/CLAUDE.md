@@ -104,7 +104,7 @@ Forwarded text → `forward_or_text_handler` → `ai.extract_from_text()` → `a
 Voice note → `voice_handler` → Whisper transcription → `ai.classify_intent()` → if "recall": generate
 brief; if "capture": `ai.extract_from_voice()` → `_save_capture()` (no quality gate for voice)
 
-Image/screenshot → `image_handler` → `ai.extract_from_image()` (Claude Vision) → `_save_capture()`
+Image/screenshot → `image_handler` → `ai.extract_from_image()` (gpt-4o-mini vision) → `_save_capture()`
 
 `_save_capture()` in `flows.py` is the shared write path: find-or-create company + lead,
 `db.log_interaction()` (transactionally bumps `last_activity_at`), then sends a confirmation card with
@@ -175,7 +175,8 @@ Nixpacks, deployed via `railway up` from `bot/`. Confirmed by Gaurav 2026-07-17.
 - **Nudge 204 path:** still unverified, and untestable against seeded data by design — the
   endpoint 409s on any rep with a negative `telegram_id` (all seeded reps) before calling
   Telegram. Needs a lead temporarily assigned to a real positive `telegram_id` (user 14).
-- **Blocker:** the demo-mode build and `DEMO_MODE=true` are **not yet deployed** — Railway
-  commands are blocked for Claude by the permission classifier and must be run by Gaurav.
-  Until then the live API omits `demo_mode` and behaviour is identical to before.
+- **Blocker:** none. Demo mode is deployed and verified in production (`DEMO_MODE=true`,
+  build `1568cd3`). Railway commands remain blocked for Claude by the permission classifier,
+  so Gaurav runs any future `railway up` — and note it uploads the *working directory*, not
+  the pushed commit, so deploy after committing or an older build ships.
 - **Last updated:** 2026-07-18

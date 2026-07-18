@@ -2327,7 +2327,10 @@
       if (!res.ok) {
         let detail = '';
         try { detail = (await res.json()).detail || ''; } catch (e) { /* non-JSON body */ }
-        throw new Error(`${res.status}${detail ? ' — ' + detail : ''}`);
+        const err = new Error(`${res.status}${detail ? ' — ' + detail : ''}`);
+        err.status = res.status;   // callers branch on this, not on the message text
+        err.detail = detail;
+        throw err;
       }
       if (res.status === 204) return undefined;
       return res.json();
@@ -2841,6 +2844,17 @@
         await apiFetch('/api/leads/' + leadId + '/nudge', { method: 'POST' });
         btn.textContent = 'Nudged';
       } catch (e) {
+        // 409 = the assigned rep has no linked Telegram account. On sample data
+        // that is every rep (seeded reps carry negative telegram_ids), so this
+        // is an expected, explainable state — not a failure. Saying "Failed"
+        // would misreport a working feature as broken.
+        if (e && e.status === 409) {
+          btn.textContent = 'No Telegram';
+          btn.title = 'This rep has no linked Telegram account, so there is nobody to notify. '
+            + 'Sample reps are not on Telegram.';
+          setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3000);
+          return;
+        }
         btn.textContent = 'Failed';
         btn.disabled = false;
         console.warn('[nudge] failed for lead ' + leadId, e);
