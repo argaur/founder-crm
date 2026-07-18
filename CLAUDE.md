@@ -190,9 +190,18 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
   key off lead *ownership* rather than role — `/register` mints every new account
   as a `manager`, and managers were bypassing the banner entirely, so a reviewer
   signing up saw seeded data with no label at all.
-- **Current task:** Phase 9 end-to-end demo-spine walkthrough (never run on the
-  live bot), and a browser click-through of the demo banner/clear flow plus the
-  space-matching/signal-tag surfaces (still never visually verified).
+- **Renamed to SitelineCRM (2026-07-18, commit `aa43678`).** Harshit's review asked
+  for one name; the product had three live at once. Wordmark is now `SITELINECRM`,
+  the bot is `@SitelineCRMbot` (a **new** bot — Telegram cannot rename a bot's
+  username, so the old `@RethinkCRMbot` was recreated, meaning a new
+  `TELEGRAM_BOT_TOKEN`), and the repo/Pages path is `argaur/siteline-crm`. The old
+  Pages URL now 404s by design. Deliberately NOT renamed: the Railway service
+  hostname (`founder-crm-bot-production.up.railway.app`, never on screen) and the
+  `siteline.demoCleared` / `siteline_wx_` localStorage keys.
+- **Current task:** confirm the renamed deep link end to end (`/dashboard` on the
+  new bot must return a `siteline-crm` link — this needs the Railway redeploy),
+  plus the still-outstanding demo-spine walkthrough and browser click-through of
+  the demo banner/clear flow and space-matching/signal-tag surfaces.
 - **Extraction eval:** run 2026-07-18 — **93.5% (129/138)**, above the 0.8 gate.
   All 9 misses are `stage` defaulting to `Inquiry` instead of `Qualified`/`unknown`;
   a prompt-tuning item in `ai.py`, not a regression.
@@ -203,5 +212,7 @@ DASHBOARD_TOKEN_SECRET  # HMAC signing key for dashboard tokens
 - **Blocker:** none on deploy. Railway commands are blocked for Claude by the
   permission classifier, so any future `railway up` must be run by Gaurav.
   Note `railway up` uploads the *working directory*, not the pushed commit —
-  deploy after committing, or an older build ships.
+  deploy after committing, or an older build ships. **Post-rename, Railway also
+  needs `BOT_NAME=SitelineCRMbot` and the new bot's `TELEGRAM_BOT_TOKEN`** — until
+  both land plus a redeploy, the bot hands out dead `founder-crm` dashboard links.
 - **Last updated:** 2026-07-18
