@@ -318,6 +318,40 @@
     .funnel-val { font-size: 0.72rem; font-weight: 600; color: var(--ink);
       font-variant-numeric: tabular-nums; white-space: nowrap; }
     .funnel-val.won { color: #15803D; }
+    /* Needs-a-human (Task 8) */
+    .att-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+      padding: 8px 0; border-top: 1px solid var(--border); }
+    .att-row:first-child { border-top: none; }
+    .att-co { font-weight: 700; font-size: 0.8rem; color: var(--ink); cursor: pointer; }
+    .att-reason { font-size: 0.68rem; color: var(--text-2); margin-top: 1px; }
+    .att-right { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .att-days { font-size: 0.62rem; padding: 2px 7px; border-radius: 5px;
+      background: var(--surface-2); color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .att-nudge { font-family: var(--sans); font-size: 0.62rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink); cursor: pointer;
+      background: none; border: none; border-bottom: 1px solid var(--border-2); padding: 0 0 1px; }
+    .att-nudge:hover { border-color: var(--ink); }
+    .att-nudge:disabled { color: var(--text-3); cursor: default; border-color: transparent; }
+    /* Live activity (Task 9) */
+    .act-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: start;
+      padding: 7px 0; border-top: 1px solid var(--border); }
+    .act-row:first-child { border-top: none; }
+    .act-row.newest { border-left: 2px solid var(--ink); padding-left: 8px; margin-left: -10px; }
+    .act-icon svg { display: block; margin-top: 2px; }
+    .act-summary { font-size: 0.75rem; color: var(--ink); line-height: 1.4;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .act-co { font-size: 0.64rem; color: var(--text-3); margin-top: 1px; }
+    .act-time { font-size: 0.64rem; color: var(--text-3); font-variant-numeric: tabular-nums;
+      white-space: nowrap; }
+    .act-empty-feed { margin-top: 20px; }
+    /* City footprint (Task 10) */
+    .city-strip { display: flex; gap: 20px; flex-wrap: wrap; }
+    .city-card { min-width: 120px; }
+    .city-name { font-weight: 700; font-size: 0.8rem; color: var(--ink); }
+    .city-figs { font-size: 0.68rem; color: var(--text-2); margin-top: 2px;
+      font-variant-numeric: tabular-nums; }
+    .city-bar { height: 3px; background: var(--ink); border-radius: 2px; margin-top: 6px;
+      min-width: 4px; }
     .panel-hd {
       display: flex;
       align-items: center;
@@ -2366,7 +2400,21 @@
         // rep-empty OR cold-start — both show the explainer.
         dataEl.classList.add('hidden');
         emptyEl.classList.remove('hidden');
-        // Task 9 replaces the deleted demo-box with the real activity feed here.
+        // Replace the deleted demo-box with the REAL platform activity feed
+        // (read-scoped) — the "yours will appear here" promise, shown with true
+        // data instead of fabricated rows. Cold-start (no activity) shows nothing.
+        let feed = document.getElementById('empty-activity-feed');
+        if (!feed) {
+          feed = document.createElement('div');
+          feed.id = 'empty-activity-feed';
+          feed.className = 'panel act-empty-feed';
+          emptyEl.appendChild(feed);
+        }
+        const items = (overviewData.activity || []);
+        feed.innerHTML = items.length
+          ? '<div class="panel-hd"><span class="panel-title">Live Activity</span></div>' +
+            activityRowsHTML(items)
+          : '';
         return;
       }
 
@@ -2656,12 +2704,128 @@
         </div>`;
       }).join('');
     }
-    // Task 8/9/10 render logic lands in a later session — until then, show an
-    // honest placeholder instead of a blank body under the panel titles.
-    function renderAttention(o) { document.getElementById('home-attention').innerHTML = '<div class="panel-empty">More insights coming soon.</div>'; }
-    function renderActivity(o) { document.getElementById('home-activity').innerHTML = '<div class="panel-empty">More insights coming soon.</div>'; }
-    function renderCities(o) { document.getElementById('home-cities').innerHTML = '<div class="panel-empty">More insights coming soon.</div>'; }
-    function applyRepLayout(role) {}
+    // ── Needs a Human Today (Task 8) ──────────────────────────────
+    // Reason line from fields already in the payload — template strings, no AI.
+    function attentionReason(a) {
+      const now = Date.now();
+      if (a.move_in_date) {
+        const days = Math.round((new Date(a.move_in_date + 'T00:00:00').getTime() - now) / 86400000);
+        if (days >= 0 && days <= 14) return `Move-in in ${days} day${days === 1 ? '' : 's'}, needs a push`;
+      }
+      if (a.stage === 'Negotiation' && a.days_stalled >= 3) {
+        return `In Negotiation, no activity for ${a.days_stalled} days`;
+      }
+      return `${a.days_stalled} day${a.days_stalled === 1 ? '' : 's'} quiet in ${a.stage}`;
+    }
+    function renderAttention(o) {
+      const rows = o.attention || [];
+      const el = document.getElementById('home-attention');
+      if (!rows.length) {
+        el.innerHTML = '<div class="panel-empty">Nothing needs a human right now.</div>';
+        return;
+      }
+      const isManager = currentUser && currentUser.role === 'manager';
+      el.innerHTML = rows.map(a => {
+        const nudge = isManager
+          ? `<button class="att-nudge" onclick="nudgeLead('${a.lead_id}', this)">Nudge</button>` : '';
+        return `<div class="att-row">
+          <div>
+            <div class="att-co" onclick="openContactDetail('${a.lead_id}')">${esc(a.company || a.contact_name || '—')}</div>
+            <div class="att-reason">${esc(attentionReason(a))}</div>
+          </div>
+          <div class="att-right">
+            <span class="att-days">${a.days_stalled}d</span>
+            ${nudge}
+          </div>
+        </div>`;
+      }).join('');
+    }
+    async function nudgeLead(leadId, btn) {
+      btn.disabled = true;
+      const original = btn.textContent;
+      try {
+        await apiFetch('/api/leads/' + leadId + '/nudge', { method: 'POST' });
+        btn.textContent = 'Nudged';
+      } catch (e) {
+        btn.textContent = 'Failed';
+        btn.disabled = false;
+        console.warn('[nudge] failed for lead ' + leadId, e);
+        setTimeout(() => { btn.textContent = original; }, 2500);
+      }
+    }
+
+    // ── Live Activity (Task 9) ────────────────────────────────────
+    // 16px ink icons (stroke 1.5) per interaction type — chat/mic/camera/pencil.
+    const ACT_ICONS = {
+      whatsapp_forward: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.5 7.5L3 21l2-5.5A8.5 8.5 0 1 1 21 11.5Z"/></svg>',
+      voice_note: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/></svg>',
+      screenshot: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>',
+      addnote_command: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    };
+    function activityRowsHTML(items) {
+      return items.map((a, i) => {
+        const icon = ACT_ICONS[a.type] || ACT_ICONS.addnote_command;
+        return `<div class="act-row${i === 0 ? ' newest' : ''}" ${a.lead_id ? `onclick="openContactDetail('${a.lead_id}')" style="cursor:pointer"` : ''}>
+          <span class="act-icon">${icon}</span>
+          <div>
+            <div class="act-summary">${esc(a.ai_summary || '—')}</div>
+            <div class="act-co">${esc(a.company || '')}${a.user_name ? ' · ' + esc(a.user_name) : ''}</div>
+          </div>
+          <span class="act-time">${esc(timeAgo(a.logged_at))}</span>
+        </div>`;
+      }).join('');
+    }
+    function renderActivity(o) {
+      const items = o.activity || [];
+      const el = document.getElementById('home-activity');
+      el.innerHTML = items.length
+        ? activityRowsHTML(items)
+        : '<div class="panel-empty">No activity yet.</div>';
+    }
+
+    // ── City Footprint (Task 10) ──────────────────────────────────
+    function renderCities(o) {
+      const rows = (o.by_city || []).slice(0, 6);
+      const el = document.getElementById('home-cities');
+      if (!rows.length) {
+        el.innerHTML = '<div class="panel-empty">No city activity yet.</div>';
+        return;
+      }
+      const maxVal = Math.max(1, ...rows.map(r => r.pipeline_value || 0));
+      el.innerHTML = '<div class="city-strip">' + rows.map(r => {
+        const pct = Math.max(4, Math.round((r.pipeline_value / maxVal) * 100));
+        return `<div class="city-card">
+          <div class="city-name">${esc(r.city)}</div>
+          <div class="city-figs">${r.active_count} deal${r.active_count === 1 ? '' : 's'} · ${formatINR(r.pipeline_value)}</div>
+          <div class="city-bar" style="width:${pct}%"></div>
+        </div>`;
+      }).join('') + '</div>';
+    }
+
+    // ── Rep-scoped home layout (Task 11) ──────────────────────────
+    // Rep-scoped home differences (vision §6): the endpoint already scopes the
+    // stat band to the rep's pipeline, and the Nudge button already drops out
+    // for reps (Task 8). The only visual change is ordering the Site Visit Radar
+    // — the rep's actual to-do list — above the funnel. Managers keep funnel-first.
+    function applyRepLayout(role) {
+      const dataEl = document.getElementById('home-data');
+      const grids = dataEl.querySelectorAll('.home-grid');
+      if (!grids.length) return;
+      const funnelRow = document.getElementById('home-funnel').closest('.home-grid');
+      const radarRow  = document.getElementById('home-radar').closest('.home-grid');
+      if (!funnelRow || !radarRow) return;
+      if (role === 'rep' && radarRow !== funnelRow) {
+        // Idempotent: only move if the radar row isn't already first.
+        if (dataEl.querySelector('.home-grid') !== radarRow) {
+          dataEl.insertBefore(radarRow, funnelRow);
+        }
+      } else if (role === 'manager') {
+        // Restore funnel-first if a prior rep render moved things (shared page object).
+        if (dataEl.querySelector('.home-grid') !== funnelRow) {
+          dataEl.insertBefore(funnelRow, radarRow);
+        }
+      }
+    }
 
     // ── Render Pipeline ───────────────────────────────────────────
     function renderPipeline() {
