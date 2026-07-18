@@ -57,6 +57,14 @@ NUDGE_STALE_DAYS = int(os.getenv("NUDGE_STALE_DAYS", "3"))
 # six times a day. Resets on restart; set to 0 when testing.
 NUDGE_RENOTIFY_HOURS = float(os.getenv("NUDGE_RENOTIFY_HOURS", "24"))
 
+# Demo mode (off by default — set DEMO_MODE=true only on the presentation deploy).
+# A rep who owns no leads reads the platform-wide pipeline instead of an empty one,
+# so the dashboard demonstrates itself to a first-time visitor. This deliberately
+# widens READ scope across users; it is never applied to writes (see
+# _load_lead_or_403), because the demo database is shared and a stray edit would
+# corrupt the seeded story for every later visitor.
+DEMO_MODE = os.getenv("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
+
 ACTIVE_STAGES = [s for s in db.STAGES if s not in db.CLOSED_STAGES]
 
 # interactions.type is a Postgres enum with exactly these values — the schema
@@ -93,6 +101,26 @@ async def require_manager(user: Dict[str, Any] = Depends(require_user)) -> Dict[
 
 def _can_touch_lead(user: Dict[str, Any], lead: Dict[str, Any]) -> bool:
     return user.get("role") == "manager" or lead.get("assigned_to") == user["id"]
+
+
+async def _read_scope(user: Dict[str, Any]):
+    """Resolve the pipeline read scope for a dashboard request.
+
+    Returns (assigned_to, demo_mode, pipeline). Managers always read
+    platform-wide. A rep normally reads only their own leads — but under
+    DEMO_MODE, a rep who owns nothing falls back to platform-wide so a
+    first-time visitor sees a working dashboard instead of an empty shell.
+
+    The pipeline is returned alongside the scope because resolving the scope
+    requires fetching it; callers reuse this instead of querying again.
+    """
+    if user.get("role") == "manager":
+        return None, False, await db.get_all_leads(assigned_to=None)
+
+    own = await db.get_all_leads(assigned_to=user["id"])
+    if DEMO_MODE and not any(own.values()):
+        return None, True, await db.get_all_leads(assigned_to=None)
+    return user["id"], False, own
 
 
 def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -434,25 +462,37 @@ async def api_me(user: Dict[str, Any] = Depends(require_user)):
 
 @app.get("/api/leads")
 async def api_leads(user: Dict[str, Any] = Depends(require_user)):
-    """Managers get the team-wide pipeline; reps get only their own leads."""
-    scope = None if user["role"] == "manager" else user["id"]
-    pipeline = await db.get_all_leads(assigned_to=scope)
+    """Managers get the team-wide pipeline; reps get only their own leads
+    (or the seeded pipeline under DEMO_MODE — see _read_scope)."""
+    _, demo_mode, pipeline = await _read_scope(user)
 
     all_leads = [lead for leads in pipeline.values() for lead in leads]
     company_names = await _company_names(all_leads)
     for lead in all_leads:
         lead["company"] = company_names.get(lead.get("company_id"))
 
-    return {"user": _public_user(user), "pipeline": pipeline}
+    return {"user": _public_user(user), "pipeline": pipeline, "demo_mode": demo_mode}
 
 
-async def _load_lead_or_403(lead_id: int, user: Dict[str, Any]) -> Dict[str, Any]:
+async def _load_lead_or_403(
+    lead_id: int, user: Dict[str, Any], write: bool = True
+) -> Dict[str, Any]:
+    """Load a lead, enforcing per-rep ownership.
+
+    `write=False` marks a read-only endpoint, the only kind allowed to serve a
+    seeded lead to a demo visitor. Mutations always require true ownership, so
+    a demo visitor can browse the seeded pipeline but never alter it.
+    """
     lead = await db.get_lead_by_id(lead_id)
     if lead is None:
         raise HTTPException(status_code=404, detail=f"No lead with id {lead_id}.")
-    if not _can_touch_lead(user, lead):
-        raise HTTPException(status_code=403, detail="This lead is assigned to another rep.")
-    return lead
+    if _can_touch_lead(user, lead):
+        return lead
+    if not write and DEMO_MODE:
+        _, demo_mode, _ = await _read_scope(user)
+        if demo_mode:
+            return lead
+    raise HTTPException(status_code=403, detail="This lead is assigned to another rep.")
 
 
 @app.patch("/api/leads/{lead_id}/stage")
@@ -503,7 +543,7 @@ async def api_lead_interactions(
     lead_id: int,
     user: Dict[str, Any] = Depends(require_user),
 ):
-    await _load_lead_or_403(lead_id, user)
+    await _load_lead_or_403(lead_id, user, write=False)
     return await db.get_interactions(lead_id, limit=20)
 
 
@@ -513,10 +553,11 @@ async def api_overview(user: Dict[str, Any] = Depends(require_user)):
     own leads for leads-derived sections. Inventory (org-level) and activity
     (platform-wide read) stay unscoped so a new rep's home is never blank.
     Aggregation mirrors /api/team/funnel exactly (value_of, month-start proxy,
-    ACTIVE_STAGES)."""
-    scope = None if user["role"] == "manager" else user["id"]
+    ACTIVE_STAGES). Under DEMO_MODE a lead-less rep reads platform-wide and the
+    payload carries demo_mode=true so the dashboard can label the data as
+    seeded — see _read_scope."""
+    scope, demo_mode, pipeline = await _read_scope(user)
 
-    pipeline = await db.get_all_leads(assigned_to=scope)
     stale = await db.get_stale_leads(days=NUDGE_STALE_DAYS, assigned_to=scope)
     spaces = await db.get_all_spaces()
     recent = await db.get_recent_interactions(limit=10)
@@ -682,6 +723,7 @@ async def api_overview(user: Dict[str, Any] = Depends(require_user)):
 
     return {
         "user": _public_user(user),
+        "demo_mode": demo_mode,
         "totals": totals,
         "funnel": funnel,
         "heat": heat,
@@ -703,7 +745,7 @@ async def api_lead_matches(
     available_seats. Auth semantics inherited from _load_lead_or_403: reps
     see matches only for their own leads, managers for any. An unexpected DB
     error surfaces as FastAPI's standard 500, same as every other endpoint."""
-    lead = await _load_lead_or_403(lead_id, user)
+    lead = await _load_lead_or_403(lead_id, user, write=False)
     result = await db.get_matches_for_lead(lead)
     return {"lead_id": lead_id, **result}
 

@@ -189,6 +189,43 @@
       border-radius: 8px;
     }
 
+    /* Sample-data notice. Monochrome per DESIGN_BRIEF (no accent hue) — it
+       informs, it isn't an error, so it reads as a surface not an alarm. */
+    .demo-banner {
+      font-family: var(--sans);
+      font-size: 0.68rem;
+      color: var(--text-2);
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .demo-banner strong { color: var(--text); font-weight: 700; }
+    .demo-banner-txt { line-height: 1.5; }
+    .demo-banner-btn {
+      flex-shrink: 0;
+      font-family: var(--sans);
+      font-size: 0.66rem;
+      font-weight: 600;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border-2);
+      border-radius: 6px;
+      padding: 0 14px;
+      min-height: 34px;
+      cursor: pointer;
+    }
+    .demo-banner-btn:hover { background: var(--surface-2); }
+    @media (max-width: 640px) {
+      .demo-banner { flex-direction: column; align-items: flex-start; gap: 12px; }
+      .demo-banner-btn { width: 100%; min-height: 44px; }
+    }
+
     /* ── SKELETON ────────────────────────── */
     .skeleton {
       background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
@@ -1786,6 +1823,22 @@
         </div>
       </header>
 
+      <!-- Sample-data notice. Shown whenever the API reports demo_mode — i.e.
+           this account owns no leads and is reading the seeded pipeline so the
+           dashboard can demonstrate itself. Sits outside the page containers so
+           it labels the sample data on Pipeline/Contacts/Follow-ups too, not
+           just Home — every surface showing seeded rows says so. -->
+      <div id="demo-banner" class="demo-banner hidden">
+        <div class="demo-banner-txt">
+          <strong>You're viewing sample data.</strong>
+          These deals are seeded for demonstration. Your own pipeline builds
+          itself as you forward conversations to the Telegram bot.
+        </div>
+        <button id="demo-dismiss" class="demo-banner-btn" type="button">
+          Clear sample data
+        </button>
+      </div>
+
       <!-- ── PAGE: HOME ──────────────────────────────────────────── -->
       <div id="page-home" class="page active pg">
 
@@ -2349,6 +2402,11 @@
         if (!data || !overview) return;   // 401 → apiFetch already rendered sign-in
         overviewData = overview;
         pipelineData = data.pipeline || {};
+        // Sample data cleared → drop the seeded rows here, at the single point
+        // where they enter the app, so Pipeline/Contacts/Follow-ups go empty in
+        // step with Home. The server still returns them (the preference is
+        // browser-local by design); this is where we honour it.
+        if (overview.demo_mode && demoCleared()) pipelineData = {};
         allLeads = Object.values(pipelineData).flat();
         if (data.user) currentUser = data.user;
         revealManagerNav();
@@ -2385,6 +2443,44 @@
     //   rep-empty— rep with zero own leads but the platform is alive: explainer
     //              + real activity feed (wired in Task 9), never fake rows
     //   cold     — zero leads AND zero platform activity: explainer + zeroed stats
+    // Clearing sample data is a per-browser preference, deliberately not a
+    // server-side delete: the seeded rows are owned by other accounts, and the
+    // API rejects demo writes. An incognito window resets it, which is the
+    // escape hatch if you clear it mid-walkthrough.
+    const DEMO_CLEARED_KEY = 'siteline.demoCleared';
+    function demoCleared() {
+      try { return localStorage.getItem(DEMO_CLEARED_KEY) === '1'; }
+      catch (e) { return false; }   // private mode / storage disabled
+    }
+    function clearDemoData() {
+      try { localStorage.setItem(DEMO_CLEARED_KEY, '1'); } catch (e) {}
+      // Re-run the whole load so every view drops the seeded rows together,
+      // not just Home.
+      loadData(true);
+    }
+
+    // The explainer state, shared by the rep-empty, cold-start, and
+    // sample-data-cleared paths. `items` are the activity rows to show beneath
+    // it — pass [] for a genuinely clean slate.
+    function renderHomeEmpty(dataEl, emptyEl, items) {
+      dataEl.classList.add('hidden');
+      emptyEl.classList.remove('hidden');
+      // The REAL platform activity feed (read-scoped) stands in for the deleted
+      // demo box — the "yours will appear here" promise shown with true data
+      // rather than fabricated rows. No activity → nothing rendered.
+      let feed = document.getElementById('empty-activity-feed');
+      if (!feed) {
+        feed = document.createElement('div');
+        feed.id = 'empty-activity-feed';
+        feed.className = 'panel act-empty-feed';
+        emptyEl.appendChild(feed);
+      }
+      feed.innerHTML = (items && items.length)
+        ? '<div class="panel-hd"><span class="panel-title">Live Activity</span></div>' +
+          activityRowsHTML(items)
+        : '';
+    }
+
     function renderHome() {
       document.getElementById('home-loading').style.display = 'none';
       const dataEl  = document.getElementById('home-data');
@@ -2396,25 +2492,23 @@
       const scopeHasLeads = o.totals.active_leads > 0 || o.totals.closed_won_count > 0;
       const platformAlive = (o.activity || []).length > 0;
 
+      // Sample data is shown until the visitor clears it. Clearing is a local
+      // preference, not a delete — the seeded rows belong to other accounts and
+      // are never mutated (the API refuses demo writes outright).
+      const showingDemo = !!o.demo_mode && !demoCleared();
+      const banner = document.getElementById('demo-banner');
+      if (banner) banner.classList.toggle('hidden', !showingDemo);
+
+      // Cleared sample data → fall through to the honest empty state below,
+      // even though the payload still carries the seeded pipeline.
+      if (o.demo_mode && !showingDemo) {
+        renderHomeEmpty(dataEl, emptyEl, []);
+        return;
+      }
+
       if (!scopeHasLeads && role !== 'manager') {
         // rep-empty OR cold-start — both show the explainer.
-        dataEl.classList.add('hidden');
-        emptyEl.classList.remove('hidden');
-        // Replace the deleted demo-box with the REAL platform activity feed
-        // (read-scoped) — the "yours will appear here" promise, shown with true
-        // data instead of fabricated rows. Cold-start (no activity) shows nothing.
-        let feed = document.getElementById('empty-activity-feed');
-        if (!feed) {
-          feed = document.createElement('div');
-          feed.id = 'empty-activity-feed';
-          feed.className = 'panel act-empty-feed';
-          emptyEl.appendChild(feed);
-        }
-        const items = (overviewData.activity || []);
-        feed.innerHTML = items.length
-          ? '<div class="panel-hd"><span class="panel-title">Live Activity</span></div>' +
-            activityRowsHTML(items)
-          : '';
+        renderHomeEmpty(dataEl, emptyEl, overviewData.activity || []);
         return;
       }
 
@@ -3445,6 +3539,7 @@
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && activeNoteRecId) closeNoteModal();
     });
+    document.getElementById('demo-dismiss').addEventListener('click', clearDemoData);
 
     // ── Init ──────────────────────────────────────────────────────
     const _botEl = document.getElementById('bot-open-link');
