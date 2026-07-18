@@ -8,13 +8,16 @@ time-boxed loop, with git as memory.
 ## What this measures
 
 `extract_from_voice(transcript)` returns a fixed JSON schema (`contact_name`, `company`, `role`,
-`stage`, `summary`, `next_action`, `budget_signal`) from a voice-note transcript. This harness
-scores it against `dataset.jsonl`, a labelled set of realistic transcripts (including Hinglish/
-informal phrasing, matching real usage).
+`stage`, `summary`, `next_action`, `budget_signal`, `seat_count`, `city`, `space_type`,
+`budget_per_seat`, `move_in_date`) from a voice-note transcript. This harness scores it against
+`dataset.jsonl`, a labelled set of realistic transcripts (including Hinglish/informal phrasing,
+matching real usage).
 
-**Only 4 fields are scored**, all deterministic/categorical:
+**6 fields are scored per row**, all deterministic/categorical (see `SCORED_FIELDS` in
+`score_extraction.py` — that list is the source of truth):
 - `stage` — exact match against the enum
-- `contact_name_present`, `company_present`, `budget_signal_present` — presence/absence match
+- `contact_name_present`, `company_present`, `budget_signal_present`, `seat_count_present`,
+  `city_present` — presence/absence match
 
 `summary` and `next_action` are **excluded from the score** — they're free text, and grading
 prose without a human or a second LLM-as-judge reintroduces the non-determinism this pattern is
@@ -57,6 +60,16 @@ the extraction. This is the same rule Karpathy's pattern calls a "read-only trus
 
 ## Dataset
 
-`dataset.jsonl` is a **synthetic starter set** (22 examples) — realistic but hand-written, not
+`dataset.jsonl` is a **synthetic starter set** (23 examples) — realistic but hand-written, not
 pulled from real bot traffic. Expand it over time with real, anonymized transcripts as the bot
 accumulates usage; a bigger, more representative set makes the accuracy number more trustworthy.
+
+23 rows × 6 scored fields = **138 scored fields per run**, which is the denominator the script
+prints.
+
+## Last recorded result
+
+**2026-07-18 — 93.5% (129/138).** All 9 misses were `stage`: the model defaults to `Inquiry`
+where `Qualified` or `unknown` is correct, i.e. it under-reads stage rather than over-reading it.
+That failure mode is conservative (it never invents late-stage progress), which is the safer
+direction for a sales pipeline, but it is the obvious next prompt-tuning target.
